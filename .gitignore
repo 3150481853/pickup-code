@@ -1,0 +1,15 @@
+# 参考源码（HandyCode），只在本地看，不进仓库
+.ref/
+
+# 构建产物
+ios/build/
+ios/*.xcodeproj/
+ios/*.xcworkspace/
+out/
+dist/
+*.ipa
+*.zip
+
+# 系统杂项
+.DS_Store
+Thumbs.db

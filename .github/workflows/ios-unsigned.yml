@@ -1,0 +1,54 @@
+name: build-unsigned-ipa
+
+# 手动触发，或推到 main 自动跑。产物是「未签名 ipa」，下载后丢给全能签自己签。
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 XcodeGen
+        run: brew install xcodegen
+
+      - name: 生成 Xcode 工程
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: 编译（不签名）
+        working-directory: ios
+        run: |
+          xcodebuild \
+            -project PickupCode.xcodeproj \
+            -scheme PickupCode \
+            -sdk iphoneos \
+            -configuration Release \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: 打包成 ipa
+        run: |
+          set -e
+          rm -rf out && mkdir -p out/Payload
+          cp -R ios/build/Build/Products/Release-iphoneos/PickupCode.app out/Payload/
+          cd out
+          zip -qry PickupCode-unsigned.ipa Payload
+          ls -lh PickupCode-unsigned.ipa
+          echo "--- 结构 ---"
+          unzip -l PickupCode-unsigned.ipa | head -30
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: PickupCode-unsigned-ipa
+          path: out/PickupCode-unsigned.ipa
+          if-no-files-found: error

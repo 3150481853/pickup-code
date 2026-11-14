@@ -1,0 +1,18 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>loading</title>
+<div id="out">running</div>
+<script>
+  window.__err = null;
+  window.addEventListener('error', function (e) {
+    window.__err = (e.message || '') + ' @' + (e.filename || '') + ':' + (e.lineno || 0);
+  });
+  window.addEventListener('load', function () {
+    setTimeout(function () {
+      document.getElementById('out').textContent =
+        window.__err ? ('SYNTAX/RUNTIME ERROR: ' + window.__err) : 'SCRIPT LOADED OK';
+      document.title = window.__err ? 'ERR' : 'OK';
+    }, 300);
+  });
+</script>
+<script src="pdd-pickup.user.js"></script>
