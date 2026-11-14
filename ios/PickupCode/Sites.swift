@@ -45,7 +45,15 @@ enum Sites {
     static let cainiaoTakeEntry = URL(string: "https://page.cainiao.com/xiniao-web/xn-h5-gg-tab-closed-takeParcel/#/")!
 
     static let all: [SiteSpec] = [
-        // 拼多多：身份码 + 待取包裹（淘宝/天猫里被拼多多代收的件会出现在这里，主要是圆通）
+        SiteSpec(id: "cainiao",
+                 tabTitle: "菜鸟取件",
+                 entry: cainiaoTakeEntry,
+                 allowedHosts: ["cainiao.com", "taobao.com", "tmall.com", "alipay.com", "alibaba.com"],
+                 scriptName: "inject-taobao",
+                 loginURL: taobaoLogin(to: cainiaoTakeEntry),
+                 autoReturnAfterLogin: true,
+                 hint: "要点「整页登录」登一次淘宝；登录后这里就是菜鸟「取包裹」原文列表")
+
         SiteSpec(id: "pdd",
                  tabTitle: "拼多多",
                  entry: pddEntry,
@@ -58,6 +66,7 @@ enum Sites {
         // 淘宝：官方「学校/驿站」tab，里面才是待取件**列表**。
         // 注意 end-collect-platform/identity-code 那一页只有身份码、没有包裹列表，
         // 所以聚合用的入口用这个（HandyCode 也是拿它当「待取包裹」入口）。
+
         SiteSpec(id: "taobao",
                  tabTitle: "淘宝取件",
                  entry: taobaoEntry,
@@ -69,14 +78,6 @@ enum Sites {
 
         // 菜鸟「取包裹」：菜鸟 App 那个「取包裹·共N件」列表的网页版。
         // 需要淘宝登录（同一套 SessionID），所以登录走淘宝整页登录。
-        SiteSpec(id: "cainiao",
-                 tabTitle: "菜鸟取件",
-                 entry: cainiaoTakeEntry,
-                 allowedHosts: ["cainiao.com", "taobao.com", "tmall.com", "alipay.com", "alibaba.com"],
-                 scriptName: "inject-taobao",
-                 loginURL: taobaoLogin(to: cainiaoTakeEntry),
-                 autoReturnAfterLogin: true,
-                 hint: "要点「整页登录」登一次淘宝；登录后这里就是菜鸟「取包裹」原文列表")
     ]
 
     // WKWebView 默认 UA 结尾是 "Mobile/15E148"，**没有 "Safari/604.1" 这一段**。
