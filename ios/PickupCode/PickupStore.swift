@@ -21,7 +21,8 @@ final class PickupStore: ObservableObject {
 
     static let siteName: [String: String] = [
         "pdd": "拼多多",
-        "taobao": "淘宝/菜鸟"
+        "taobao": "淘宝/菜鸟",
+        "taobao-id": "身份码"
     ]
 
     // 从注入脚本 postMessage 过来的字典里解析

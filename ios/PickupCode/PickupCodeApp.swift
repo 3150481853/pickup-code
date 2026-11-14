@@ -247,7 +247,7 @@ struct HomeView: View {
         VStack(spacing: 10) {
             Text("还没有取件码")
                 .font(.system(size: 15, weight: .medium))
-            Text("先在下面三个标签里各登录一次：\n「拼多多」看代取的圆通件，「淘宝取件」看菜鸟那批。\n登录一次会记住，抓到的码自动汇总到这里。")
+            Text("先在「拼多多」和「淘宝取件」两个标签里各登录一次：\n拼多多看代收的件，淘宝看菜鸟驿站那批。\n登录一次会记住，抓到的码自动汇总到这里。")
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
