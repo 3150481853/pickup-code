@@ -306,11 +306,6 @@ struct HomeView: View {
 
     @State private var showAdd = false
     @State private var showShare = false
-    @State private var openCode: String? = nil      // 当前向左划开的那一行
-    @State private var dragCode: String? = nil      // 正在拖动的那一行
-    @State private var dragX: CGFloat = 0
-
-    private let actionWidth: CGFloat = 170          // 划开后露出的两个按钮总宽
 
     private var subtitle: String {
         if store.items.isEmpty { return "还没有数据" }
@@ -387,15 +382,18 @@ struct HomeView: View {
                 emptyView
                 Spacer()
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 8) {
-                        ForEach(store.items) { item in
-                            row(item)
-                        }
+                // 用 List + 系统 swipeActions：手势仲裁交给 UIKit，
+                // 之前自己在 ScrollView 里挂 DragGesture，竖向滑动经常被它抢走，表现成「滑不动」。
+                List {
+                    ForEach(store.items) { item in
+                        row(item)
+                            .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 28)
                 }
+                .listStyle(.plain)
+                .background(Color.clear)
             }
         }
         .sheet(isPresented: $showAdd) {
@@ -465,63 +463,18 @@ struct HomeView: View {
 
     /// 一行待取件：向左划出「置顶 / 删除」两个按钮
     private func row(_ item: PickupItem) -> some View {
-        let base: CGFloat = (openCode == item.code) ? -actionWidth : 0
-        let live: CGFloat = (dragCode == item.code) ? dragX : 0
-        let offset = min(0, max(-actionWidth, base + live))
-        return ZStack(alignment: .trailing) {
-            HStack(spacing: 0) {
-                Button(action: { store.togglePin(item.code); closeSwipe() }) {
-                    Text(store.isPinned(item.code) ? "取消置顶" : "置顶")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(.white)
-                        .frame(width: actionWidth / 2)
-                        .frame(maxHeight: .infinity)
-                        .background(Color(red: 0.20, green: 0.45, blue: 0.95))
-                }
-                .buttonStyle(PlainButtonStyle())
-
-                Button(action: { store.dismiss(item); closeSwipe() }) {
-                    Text("删除")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(.white)
-                        .frame(width: actionWidth / 2)
-                        .frame(maxHeight: .infinity)
-                        .background(Color(red: 0.90, green: 0.22, blue: 0.25))
-                }
-                .buttonStyle(PlainButtonStyle())
-            }
+        cardBody(item)
             .clipShape(RoundedRectangle(cornerRadius: 12))
-
-            cardBody(item)
-                .offset(x: offset)
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: 12)
-                        .onChanged { v in
-                            // 只接管横向手势，竖向交给 ScrollView，不然首页没法上下滚
-                            guard abs(v.translation.width) > abs(v.translation.height) + 4 else { return }
-                            if dragCode != item.code { dragCode = item.code; dragX = 0 }
-                            dragX = v.translation.width
-                        }
-                        .onEnded { v in
-                            guard dragCode == item.code else { dragCode = nil; dragX = 0; return }
-                            let dx = v.translation.width
-                            if base == 0 {
-                                openCode = (dx < -actionWidth * 0.35) ? item.code : nil
-                            } else {
-                                openCode = (dx > actionWidth * 0.25) ? nil : item.code
-                            }
-                            dragCode = nil
-                            dragX = 0
-                        }
-                )
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-    }
-
-    private func closeSwipe() {
-        openCode = nil
-        dragCode = nil
-        dragX = 0
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button(role: .destructive, action: { store.dismiss(item) }) {
+                    Label("删除", systemImage: "trash")
+                }
+                Button(action: { store.togglePin(item.code) }) {
+                    Label(store.isPinned(item.code) ? "取消置顶" : "置顶",
+                          systemImage: store.isPinned(item.code) ? "pin.slash" : "pin")
+                }
+                .tint(Color(red: 0.20, green: 0.45, blue: 0.95))
+            }
     }
 
     private func cardBody(_ item: PickupItem) -> some View {
@@ -566,7 +519,6 @@ struct HomeView: View {
         .background(Color(UIColor.secondarySystemGroupedBackground))
         .contentShape(Rectangle())
         .onTapGesture {
-            if openCode != nil { closeSwipe(); return }
             UIPasteboard.general.string = item.code
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
         }
@@ -646,6 +598,13 @@ struct WebView: UIViewRepresentable {
 
 @main
 struct PickupCodeApp: App {
+    init() {
+        // 首页用 List + 系统 swipeActions 做「左划置顶/删除」，
+        // iOS 15 没有 scrollContentBackground(.hidden)，只能把 UITableView 底色清掉，
+        // 否则 List 会盖一层白底，卡片就看不出层次了。
+        UITableView.appearance().backgroundColor = .clear
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
