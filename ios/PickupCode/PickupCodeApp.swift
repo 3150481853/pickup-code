@@ -12,6 +12,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var needsLogin = false
     private var timer: Timer?
     private var cainiaoTimer: Timer?
+    private var sweepTimer: Timer?
 
     init() {
         boxes = Sites.all.map { WebBox(spec: $0) }
@@ -27,6 +28,10 @@ final class AppModel: ObservableObject {
         }
         cainiaoTimer = Timer.scheduledTimer(withTimeInterval: 45, repeats: true) { [weak self] _ in
             self?.queryCainiao()
+        }
+        // 「疑似已出库」满 10 分钟就归档，靠这个每 20 秒巡一次
+        sweepTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in
+            self?.store.archiveMissingIfNeeded()
         }
     }
 
@@ -314,6 +319,8 @@ struct HomeView: View {
 
     @State private var showAdd = false
     @State private var showShare = false
+    @State private var showArchive = false
+    @State private var picking = false
 
     private var subtitle: String {
         if store.items.isEmpty { return "还没有数据" }
@@ -328,58 +335,59 @@ struct HomeView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("待取件")
-                        .font(.system(size: 22, weight: .bold))
-                    Text(subtitle)
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(picking ? "拿快递模式" : "待取件")
+                            .font(.system(size: 22, weight: .bold))
+                        Text(subtitle)
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    Text("v" + ver)
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary.opacity(0.7))
                 }
-                Spacer()
-                Text("v" + (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"))
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary.opacity(0.7))
-                Button(action: { showAdd = true }) {
-                    Text("＋ 添加")
-                        .font(.system(size: 12, weight: .semibold))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color(red: 1.0, green: 0.17, blue: 0.33).opacity(0.12))
-                        .clipShape(Capsule())
+                .padding(.horizontal, 16)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        // 拿快递模式：点码记「已拿到」，出门前一键出库
+                        Button(action: {
+                            picking.toggle()
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        }) {
+                            cap(picking ? "完成" : "拿快递",
+                                system: picking ? "checkmark.circle.fill" : "hand.raised",
+                                tint: picking ? .white : Color(red: 0.13, green: 0.55, blue: 0.32),
+                                bg: picking ? Color(red: 0.13, green: 0.55, blue: 0.32) : Color(red: 0.13, green: 0.55, blue: 0.32).opacity(0.12))
+                        }
+                        Button(action: { showArchive = true }) {
+                            cap("已取 \(store.archived.count)", system: "archivebox",
+                                tint: .secondary, bg: Color.black.opacity(0.05))
+                        }
+                        Button(action: { showAdd = true }) {
+                            cap("＋ 添加", system: nil,
+                                tint: Color(red: 0.85, green: 0.10, blue: 0.25),
+                                bg: Color(red: 1.0, green: 0.17, blue: 0.33).opacity(0.12))
+                        }
+                        Button(action: { showShare = true }) {
+                            cap("分享", system: "square.and.arrow.up", tint: .secondary, bg: Color.black.opacity(0.05))
+                        }
+                        Button(action: onRefresh) {
+                            cap("刷新", system: "arrow.clockwise", tint: .primary, bg: Color.black.opacity(0.07))
+                        }
+                        Button(action: onDiagnose) {
+                            cap("诊断", system: nil, tint: .secondary, bg: Color.black.opacity(0.05))
+                        }
+                    }
+                    .padding(.horizontal, 16)
                 }
-                .foregroundColor(Color(red: 0.85, green: 0.10, blue: 0.25))
-                Button(action: onDiagnose) {
-                    Text("诊断")
-                        .font(.system(size: 12, weight: .medium))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color.black.opacity(0.05))
-                        .clipShape(Capsule())
-                }
-                .foregroundColor(.secondary)
-                Button(action: { showShare = true }) {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 14, weight: .medium))
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 6)
-                        .background(Color.black.opacity(0.05))
-                        .clipShape(Capsule())
-                }
-                .foregroundColor(.secondary)
-                Button(action: onRefresh) {
-                    Text("刷新全部")
-                        .font(.system(size: 13, weight: .medium))
-                        .padding(.horizontal, 13)
-                        .padding(.vertical, 7)
-                        .background(Color.black.opacity(0.07))
-                        .clipShape(Capsule())
-                }
-                .foregroundColor(.primary)
+                .frame(height: 32)
             }
-            .padding(.horizontal, 16)
             .padding(.top, 14)
-            .padding(.bottom, store.siteState.isEmpty ? 10 : 4)
+            .padding(.bottom, 8)
 
             if !store.siteState.isEmpty { statusLine }
 
@@ -403,6 +411,34 @@ struct HomeView: View {
                 .listStyle(.plain)
                 .background(Color.clear)
             }
+
+            if picking {
+                HStack(spacing: 10) {
+                    Text("点到手上了就点一下那条取件码  ·  已拿 \(store.picked.count) 件")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                    Spacer()
+                    Button(action: {
+                        let n = store.archivePicked()
+                        if n > 0 { UINotificationFeedbackGenerator().notificationOccurred(.success) }
+                    }) {
+                        Text(store.picked.isEmpty ? "一键出库" : "一键出库（\(store.picked.count)）")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 9)
+                            .background(store.picked.isEmpty
+                                        ? Color.gray.opacity(0.4)
+                                        : Color(red: 0.13, green: 0.55, blue: 0.32))
+                            .clipShape(Capsule())
+                    }
+                    .disabled(store.picked.isEmpty)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(.regularMaterial)
+            }
         }
         .sheet(isPresented: $showAdd) {
             AddItemView(store: store)
@@ -410,6 +446,28 @@ struct HomeView: View {
         .sheet(isPresented: $showShare) {
             SharePickerView(store: store)
         }
+        .sheet(isPresented: $showArchive) {
+            ArchiveView(store: store)
+        }
+    }
+
+    private var ver: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+    }
+
+    /// 顶栏胶囊按钮的统一外观
+    private func cap(_ title: String, system: String?, tint: Color, bg: Color) -> some View {
+        HStack(spacing: 4) {
+            if let s = system {
+                Image(systemName: s).font(.system(size: 11, weight: .medium))
+            }
+            Text(title).font(.system(size: 12, weight: .semibold))
+        }
+        .foregroundColor(tint)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(bg)
+        .clipShape(Capsule())
     }
 
     private var statusLine: some View {
@@ -477,6 +535,10 @@ struct HomeView: View {
                 Button(role: .destructive, action: { store.dismiss(item) }) {
                     Label("删除", systemImage: "trash")
                 }
+                Button(action: { store.archiveNow(item, note: "已取件") }) {
+                    Label("已取", systemImage: "checkmark.circle")
+                }
+                .tint(Color(red: 0.13, green: 0.55, blue: 0.32))
                 Button(action: { store.togglePin(item.code) }) {
                     Label(store.isPinned(item.code) ? "取消置顶" : "置顶",
                           systemImage: store.isPinned(item.code) ? "pin.slash" : "pin")
@@ -504,6 +566,12 @@ struct HomeView: View {
                             .font(.system(size: 9))
                             .foregroundColor(Color(red: 0.20, green: 0.45, blue: 0.95))
                     }
+                    if store.isPicked(item.code) {
+                        badge("已拿到", fg: .white, bg: Color(red: 0.13, green: 0.55, blue: 0.32))
+                    }
+                    if store.isMissing(item.code) {
+                        badge("疑似已出库", fg: .white, bg: Color(red: 0.93, green: 0.55, blue: 0.10))
+                    }
                     Text(metaText(item))
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
@@ -527,9 +595,26 @@ struct HomeView: View {
         .background(Color(UIColor.secondarySystemGroupedBackground))
         .contentShape(Rectangle())
         .onTapGesture {
-            UIPasteboard.general.string = item.code
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            if picking {
+                // 拿快递模式：点一下 = 这件已经拿到手上
+                store.togglePicked(item)
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            } else {
+                UIPasteboard.general.string = item.code
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            }
         }
+    }
+
+    /// 小徽章（已拿到 / 疑似已出库）
+    private func badge(_ text: String, fg: Color, bg: Color) -> some View {
+        Text(text)
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundColor(fg)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1.5)
+            .background(bg)
+            .clipShape(RoundedRectangle(cornerRadius: 3))
     }
 
     /// 左侧主图：菜鸟/拼多多给的快递图或商品图；没图时用站点图标顶一下
@@ -589,6 +674,67 @@ struct DiagView: View {
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("关闭") { isPresented = false }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - 已取 / 已出库
+
+/// 归档区：取走、出库、疑似出库满 10 分钟自动进来的都在这。
+/// 归档不是删除 —— 驿站漏返回一件（系统偶尔会）也不至于丢记录，可以「放回首页」。
+struct ArchiveView: View {
+    @ObservedObject var store: PickupStore
+    @Environment(\.presentationMode) private var presentation
+
+    var body: some View {
+        NavigationView {
+            Group {
+                if store.archived.isEmpty {
+                    VStack(spacing: 8) {
+                        Text("还没有出库记录")
+                            .font(.system(size: 15, weight: .medium))
+                        Text("取走的件会在「拿快递模式」里一键归档")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List {
+                        ForEach(store.archived) { item in
+                            HStack(alignment: .center, spacing: 12) {
+                                Thumb(item: item, side: 44)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(item.code)
+                                        .font(.system(size: 17, weight: .semibold, design: .monospaced))
+                                    Text([PickupStore.siteName[item.site] ?? item.site,
+                                          store.archiveNote(item.code)]
+                                            .joined(separator: " · "))
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.secondary)
+                                    if !item.mailNo.isEmpty {
+                                        Text("单号 " + item.mailNo)
+                                            .font(.system(size: 10, design: .monospaced))
+                                            .foregroundColor(.secondary.opacity(0.85))
+                                    }
+                                }
+                                Spacer(minLength: 0)
+                                Button("放回") { store.restore(item) }
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(Color(red: 0.20, green: 0.45, blue: 0.95))
+                            }
+                            .listRowInsets(EdgeInsets(top: 6, leading: 14, bottom: 6, trailing: 14))
+                        }
+                    }
+                    .listStyle(.plain)
+                }
+            }
+            .navigationTitle("已取 / 已出库")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("关闭") { presentation.wrappedValue.dismiss() }
                 }
             }
         }

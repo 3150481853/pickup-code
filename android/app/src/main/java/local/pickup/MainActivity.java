@@ -124,6 +124,15 @@ public class MainActivity extends Activity {
                 ui.postDelayed(this, 45000);
             }
         }, 45000);
+        // 「疑似已出库」满 10 分钟就归档，每 20 秒巡一次
+        ui.postDelayed(new Runnable() {
+            @Override public void run() {
+                int before = store.archived.size();
+                store.archiveMissingIfNeeded();
+                if (store.archived.size() != before) renderHome();
+                ui.postDelayed(this, 20000);
+            }
+        }, 20000);
     }
 
     // ---------------- UI ----------------
@@ -144,6 +153,29 @@ public class MainActivity extends Activity {
         hint.setPadding(dp(6), dp(3), dp(6), dp(3));
         hint.setVisibility(View.GONE);
         col.addView(hint);
+
+        // 拿快递模式才露出来的底部条
+        pickBar = new LinearLayout(this);
+        pickBar.setOrientation(LinearLayout.HORIZONTAL);
+        pickBar.setGravity(Gravity.CENTER_VERTICAL);
+        pickBar.setBackgroundColor(Color.rgb(246, 248, 246));
+        pickBar.setPadding(dp(14), dp(8), dp(14), dp(8));
+        pickBar.setVisibility(View.GONE);
+        pickCount = new TextView(this);
+        pickCount.setTextSize(11);
+        pickCount.setTextColor(GREY);
+        pickBar.addView(pickCount, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView outBtn = solidPill("一键出库", Color.WHITE, Color.rgb(33, 140, 82));
+        outBtn.setOnClickListener(v -> {
+            int n = store.archivePicked();
+            if (n > 0) toast("已归档 " + n + " 件");
+            picking = false;
+            updatePickBar();
+            renderHome();
+        });
+        pickBar.addView(outBtn);
+        col.addView(pickBar);
 
         tabBar = new LinearLayout(this);
         tabBar.setOrientation(LinearLayout.HORIZONTAL);
@@ -180,7 +212,7 @@ public class MainActivity extends Activity {
         LinearLayout left = new LinearLayout(this);
         left.setOrientation(LinearLayout.VERTICAL);
         TextView title = new TextView(this);
-        title.setText("待取件");
+        title.setText(picking ? "拿快递模式" : "待取件");
         title.setTextSize(22);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(INK);
@@ -217,8 +249,31 @@ public class MainActivity extends Activity {
 
         homeInner.addView(head);
 
+        // 第二行：拿快递模式 + 已取/已出库
+        LinearLayout tools = new LinearLayout(this);
+        tools.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams tlpRow = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        tlpRow.topMargin = dp(8);
+
+        TextView pickBtn = solidPill(picking ? "完成" : "拿快递",
+                Color.WHITE, Color.rgb(33, 140, 82));
+        pickBtn.setOnClickListener(v -> togglePicking());
+        tools.addView(pickBtn);
+
+        TextView archBtn = pill("已取 " + store.archived.size(), INK, Color.rgb(0, 0, 0));
+        archBtn.setOnClickListener(v -> showArchive());
+        LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        alp.leftMargin = dp(6);
+        tools.addView(archBtn, alp);
+
+        homeInner.addView(tools, tlpRow);
+
         String sub;
-        if (store.items.isEmpty()) {
+        if (picking) {
+            sub = "点一下取件码 = 已拿到 · 已拿 " + store.picked.size() + " 件";
+        } else if (store.items.isEmpty()) {
             sub = "还没有数据";
         } else {
             java.text.SimpleDateFormat f = new java.text.SimpleDateFormat("HH:mm");
@@ -272,11 +327,17 @@ public class MainActivity extends Activity {
                 homeInner.addView(row(it));
             }
         }
+        updatePickBar();
     }
 
     /** 当前向左划开的那一行卡片（同时只允许开一行） */
     View openRowView;
-    static final int SWIPE_W_DP = 170;   // 划开后露出的两个按钮总宽
+    static final int SWIPE_W_DP = 240;   // 划开后露出的三个按钮总宽
+    /** 拿快递模式：点一下卡片 = 记「已拿到」，出门前点底部「一键出库」批量归档 */
+    boolean picking = false;
+    /** 拿快递模式才显示的底部条 */
+    LinearLayout pickBar;
+    TextView pickCount;
 
     View row(PickupItem it) {
         LinearLayout card = new LinearLayout(this);
@@ -351,6 +412,37 @@ public class MainActivity extends Activity {
             meta.addView(pinMark, plp);
         }
 
+        if (store.isPicked(it.code)) {
+            TextView pk = new TextView(this);
+            pk.setText("已拿到");
+            pk.setTextSize(9);
+            pk.setTextColor(Color.WHITE);
+            pk.setPadding(dp(4), dp(1), dp(4), dp(1));
+            GradientDrawable kbg = new GradientDrawable();
+            kbg.setColor(Color.rgb(33, 140, 82));
+            kbg.setCornerRadius(dp(4));
+            pk.setBackground(kbg);
+            LinearLayout.LayoutParams klp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            klp.leftMargin = dp(5);
+            meta.addView(pk, klp);
+        }
+        if (store.isMissing(it.code)) {
+            TextView ms = new TextView(this);
+            ms.setText("疑似已出库");
+            ms.setTextSize(9);
+            ms.setTextColor(Color.WHITE);
+            ms.setPadding(dp(4), dp(1), dp(4), dp(1));
+            GradientDrawable mbg = new GradientDrawable();
+            mbg.setColor(Color.rgb(238, 140, 26));
+            mbg.setCornerRadius(dp(4));
+            ms.setBackground(mbg);
+            LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            mlp.leftMargin = dp(5);
+            meta.addView(ms, mlp);
+        }
+
         String m = it.station;
         if (!it.place.isEmpty()) m = m.isEmpty() ? it.place : m + " · " + it.place;
         if (!m.isEmpty()) {
@@ -400,10 +492,13 @@ public class MainActivity extends Activity {
         acts.setOrientation(LinearLayout.HORIZONTAL);
         TextView pinBtn = actionButton(store.isPinned(it.code) ? "取消置顶" : "置顶",
                 Color.rgb(51, 115, 242));
+        TextView doneBtn = actionButton("已取", Color.rgb(33, 140, 82));
         TextView delBtn = actionButton("删除", Color.rgb(229, 56, 63));
-        acts.addView(pinBtn, new LinearLayout.LayoutParams(dp(SWIPE_W_DP / 2),
+        acts.addView(pinBtn, new LinearLayout.LayoutParams(dp(SWIPE_W_DP / 3),
                 ViewGroup.LayoutParams.MATCH_PARENT));
-        acts.addView(delBtn, new LinearLayout.LayoutParams(dp(SWIPE_W_DP / 2),
+        acts.addView(doneBtn, new LinearLayout.LayoutParams(dp(SWIPE_W_DP / 3),
+                ViewGroup.LayoutParams.MATCH_PARENT));
+        acts.addView(delBtn, new LinearLayout.LayoutParams(dp(SWIPE_W_DP / 3),
                 ViewGroup.LayoutParams.MATCH_PARENT));
         frame.addView(acts, new FrameLayout.LayoutParams(dp(SWIPE_W_DP),
                 ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END));
@@ -416,11 +511,28 @@ public class MainActivity extends Activity {
             closeOpenRow();
             renderHome();
         });
+        doneBtn.setOnClickListener(v -> {
+            store.archiveNow(it, "已取件");
+            closeOpenRow();
+            renderHome();
+        });
         delBtn.setOnClickListener(v -> {
             store.dismiss(it);
             closeOpenRow();
             renderHome();
         });
+        // 点卡片：拿快递模式 = 记「已拿到」；平时 = 复制取件码
+        View.OnClickListener tap = v -> {
+            if (picking) {
+                store.togglePicked(it);
+                updatePickBar();
+                renderHome();
+            } else {
+                copy(it.code);
+            }
+        };
+        card.setOnClickListener(tap);
+        copyIcon.setOnClickListener(tap);
 
         attachSwipe(card, it);
         return frame;
@@ -507,6 +619,81 @@ public class MainActivity extends Activity {
         }
         v.setBackground(bg);
         return v;
+    }
+
+    /** 实心胶囊（拿快递 / 一键出库 这种需要显眼的） */
+    TextView solidPill(String text, int color, int bgColor) {
+        TextView v = new TextView(this);
+        v.setText(text);
+        v.setTextSize(12);
+        v.setTextColor(color);
+        v.setPadding(dp(14), dp(6), dp(14), dp(6));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(bgColor);
+        bg.setCornerRadius(dp(16));
+        v.setBackground(bg);
+        return v;
+    }
+
+    void togglePicking() {
+        picking = !picking;
+        if (!picking) store.picked.clear();
+        updatePickBar();
+        renderHome();
+    }
+
+    /** 底部「已拿 N 件 / 一键出库」 */
+    void updatePickBar() {
+        if (pickBar == null) return;
+        pickBar.setVisibility(picking ? View.VISIBLE : View.GONE);
+        if (pickCount != null) {
+            pickCount.setText(picking ? ("已拿 " + store.picked.size() + " 件") : "");
+        }
+    }
+
+    /** 已取 / 已出库 列表（可以「放回首页」，归档不等于删除） */
+    void showArchive() {
+        if (store.archived.isEmpty()) {
+            toast("还没有出库记录");
+            return;
+        }
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setPadding(dp(4), dp(4), dp(4), dp(4));
+        android.widget.ScrollView sv = new android.widget.ScrollView(this);
+        sv.addView(col);
+        for (PickupItem it : new ArrayList<>(store.archived)) {
+            LinearLayout r = new LinearLayout(this);
+            r.setOrientation(LinearLayout.HORIZONTAL);
+            r.setGravity(Gravity.CENTER_VERTICAL);
+            r.setPadding(dp(10), dp(9), dp(6), dp(9));
+            LinearLayout txt = new LinearLayout(this);
+            txt.setOrientation(LinearLayout.VERTICAL);
+            TextView c = new TextView(this);
+            c.setText(it.code);
+            c.setTextSize(16);
+            c.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+            c.setTextColor(INK);
+            txt.addView(c);
+            TextView d = new TextView(this);
+            d.setText(store.siteLabel(it.site) + " · " + store.archiveNote(it.code));
+            d.setTextSize(11);
+            d.setTextColor(GREY);
+            txt.addView(d);
+            r.addView(txt, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            TextView back = pill("放回", Color.rgb(51, 115, 242), Color.rgb(0, 0, 0));
+            back.setOnClickListener(v -> {
+                store.restore(it);
+                renderHome();
+            });
+            r.addView(back);
+            col.addView(r);
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("已取 / 已出库")
+                .setView(sv)
+                .setPositiveButton("关闭", null)
+                .show();
     }
 
     void buildFab() {
@@ -624,6 +811,8 @@ public class MainActivity extends Activity {
 
     void select(int idx) {
         selectedIndex = idx;
+        if (idx != 0 && picking) picking = false;   // 离开首页就退出拿快递模式
+        updatePickBar();
         buildTabBar();
         toggleFab(false);
         homeScroll.setVisibility(idx == 0 ? View.VISIBLE : View.GONE);

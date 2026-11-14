@@ -35,6 +35,14 @@ public class Store {
     public final List<String> pinned = new ArrayList<>();
     /** 左划删除的码，按站点记：源里还有它就继续藏，源里没了就自动清掉 */
     private final Map<String, List<String>> dismissed = new LinkedHashMap<>();
+    /** 拿快递模式里点过的码 */
+    public final List<String> picked = new ArrayList<>();
+    /** 已归档（已取件 / 已出库） */
+    public final List<PickupItem> archived = new ArrayList<>();
+    /** 这一站上次还有、这次没了的时间点 —— 满 10 分钟才归档 */
+    private final Map<String, Long> missingSince = new LinkedHashMap<>();
+    private final Map<String, String> archiveNotes = new LinkedHashMap<>();
+    public static final long MISSING_GRACE = 10 * 60 * 1000L;
     private final SharedPreferences sp;
     private Runnable onChange = () -> {};
 
@@ -42,6 +50,7 @@ public class Store {
         sp = ctx.getSharedPreferences("pickup", Context.MODE_PRIVATE);
         loadManual();
         loadPrefs();
+        loadArchive();
         republish();
     }
 
@@ -55,10 +64,119 @@ public class Store {
     // ---- 网页抓取结果 ----
 
     public void setCollected(String site, List<PickupItem> list, String state) {
+        reconcile(site, list);          // 先跟上一次的名单比，才能看出「哪些没了」
         collected.put(site, list);
         if (state != null) siteState.put(site, state);
         pruneDismissed(site, list);
         republish();
+    }
+
+    // ---- 名单比对：少了 → 疑似已出库 → 10 分钟后归档 ----
+
+    private void reconcile(String site, List<PickupItem> list) {
+        List<String> fresh = new ArrayList<>();
+        if (list != null) for (PickupItem it : list) if (it != null) fresh.add(it.code);
+        List<PickupItem> before = collected.get(site);
+        if (before != null) {
+            for (PickupItem it : before) {
+                if (it == null || fresh.contains(it.code)) continue;
+                if (!missingSince.containsKey(it.code)) missingSince.put(it.code, System.currentTimeMillis());
+            }
+        }
+        for (String c : fresh) {
+            missingSince.remove(c);
+            picked.remove(c);       // 又出现在名单里，说明没取走
+        }
+        saveArchive();
+    }
+
+    /** 由 MainActivity 的定时器调用：标记超过 10 分钟的归档掉 */
+    public void archiveMissingIfNeeded() {
+        if (missingSince.isEmpty()) return;
+        long cut = System.currentTimeMillis() - MISSING_GRACE;
+        List<String> due = new ArrayList<>();
+        for (Map.Entry<String, Long> e : missingSince.entrySet()) {
+            if (e.getValue() <= cut) due.add(e.getKey());
+        }
+        if (due.isEmpty()) return;
+        for (String code : due) {
+            PickupItem hit = null;
+            for (PickupItem it : items) if (it.code.equals(code)) { hit = it; break; }
+            if (hit != null) archiveNow(hit, "疑似已出库");
+            else missingSince.remove(code);
+        }
+        saveArchive();
+        republish();
+    }
+
+    public boolean isPicked(String code) { return picked.contains(code); }
+    public boolean isMissing(String code) { return missingSince.containsKey(code); }
+
+    public void togglePicked(PickupItem it) {
+        if (picked.contains(it.code)) picked.remove(it.code);
+        else picked.add(it.code);
+        saveArchive();
+        republish();
+    }
+
+    /** 归档一条：从各站名单 / 手动里摘掉，进 archived（不是删除，可以「放回」） */
+    public void archiveNow(PickupItem it, String note) {
+        for (int i = manual.size() - 1; i >= 0; i--) {
+            if (manual.get(i).code.equals(it.code)) manual.remove(i);
+        }
+        for (Map.Entry<String, List<PickupItem>> e : collected.entrySet()) {
+            List<PickupItem> l = e.getValue();
+            if (l == null) continue;
+            List<PickupItem> keep = new ArrayList<>();
+            for (PickupItem x : l) if (x != null && !x.code.equals(it.code)) keep.add(x);
+            e.setValue(keep);
+        }
+        missingSince.remove(it.code);
+        picked.remove(it.code);
+        archiveNotes.put(it.code, note);
+        for (int i = archived.size() - 1; i >= 0; i--) {
+            if (archived.get(i).code.equals(it.code)) archived.remove(i);
+        }
+        archived.add(0, it);
+        while (archived.size() > 200) archived.remove(archived.size() - 1);
+        saveArchive();
+        saveManual();
+        republish();
+    }
+
+    /** 拿快递模式收工：把所有「已拿到」的批量归档，返回条数 */
+    public int archivePicked() {
+        List<PickupItem> targets = new ArrayList<>();
+        for (PickupItem it : items) if (picked.contains(it.code)) targets.add(it);
+        for (PickupItem it : targets) archiveNow(it, "已取件");
+        return targets.size();
+    }
+
+    /** 归档区「放回首页」 */
+    public void restore(PickupItem it) {
+        for (int i = archived.size() - 1; i >= 0; i--) {
+            if (archived.get(i).code.equals(it.code)) archived.remove(i);
+        }
+        archiveNotes.remove(it.code);
+        if ("manual".equals(it.site)) {
+            manual.remove(it);
+            manual.add(it);
+        } else {
+            List<PickupItem> l = collected.get(it.site);
+            if (l == null) { l = new ArrayList<>(); collected.put(it.site, l); }
+            List<PickupItem> keep = new ArrayList<>();
+            for (PickupItem x : l) if (x != null && !x.code.equals(it.code)) keep.add(x);
+            keep.add(it);
+            collected.put(it.site, keep);
+        }
+        saveArchive();
+        saveManual();
+        republish();
+    }
+
+    public String archiveNote(String code) {
+        String s = archiveNotes.get(code);
+        return s == null ? "已取件" : s;
     }
 
     public void clearSite(String site) {
@@ -145,6 +263,78 @@ public class Store {
             }
             sp.edit().putString("pinned.v1", arr.toString())
                      .putString("dismissed.v1", o.toString()).apply();
+        } catch (Exception ignored) {}
+    }
+
+    // ---- 已拿到 / 归档 落盘 ----
+
+    private void saveArchive() {
+        try {
+            JSONArray p = new JSONArray();
+            for (String c : picked) p.put(c);
+            JSONObject miss = new JSONObject();
+            for (Map.Entry<String, Long> e : missingSince.entrySet()) miss.put(e.getKey(), e.getValue());
+            JSONObject notes = new JSONObject();
+            for (Map.Entry<String, String> e : archiveNotes.entrySet()) notes.put(e.getKey(), e.getValue());
+            JSONArray arch = new JSONArray();
+            for (PickupItem it : archived) {
+                JSONObject o = new JSONObject();
+                o.put("code", it.code);
+                o.put("site", it.site);
+                o.put("station", it.station);
+                o.put("place", it.place);
+                o.put("mailNo", it.mailNo == null ? "" : it.mailNo);
+                o.put("img", it.img == null ? "" : it.img);
+                o.put("note", archiveNote(it.code));
+                arch.put(o);
+            }
+            sp.edit().putString("picked.v1", p.toString())
+                     .putString("missing.v1", miss.toString())
+                     .putString("archived.notes.v1", notes.toString())
+                     .putString("archived.v1", arch.toString()).apply();
+        } catch (Exception ignored) {}
+    }
+
+    private void loadArchive() {
+        try {
+            String raw = sp.getString("picked.v1", "");
+            if (raw != null && !raw.isEmpty()) {
+                JSONArray arr = new JSONArray(raw);
+                for (int i = 0; i < arr.length(); i++) picked.add(arr.getString(i));
+            }
+        } catch (Exception ignored) {}
+        try {
+            String raw = sp.getString("missing.v1", "");
+            if (raw != null && !raw.isEmpty()) {
+                JSONObject o = new JSONObject(raw);
+                java.util.Iterator<String> keys = o.keys();
+                while (keys.hasNext()) {
+                    String k = keys.next();
+                    missingSince.put(k, o.optLong(k));
+                }
+            }
+        } catch (Exception ignored) {}
+        try {
+            String raw = sp.getString("archived.notes.v1", "");
+            if (raw != null && !raw.isEmpty()) {
+                JSONObject o = new JSONObject(raw);
+                java.util.Iterator<String> keys = o.keys();
+                while (keys.hasNext()) {
+                    String k = keys.next();
+                    archiveNotes.put(k, o.optString(k));
+                }
+            }
+        } catch (Exception ignored) {}
+        try {
+            String raw = sp.getString("archived.v1", "");
+            if (raw == null || raw.isEmpty()) return;
+            JSONArray arr = new JSONArray(raw);
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject o = arr.getJSONObject(i);
+                archived.add(new PickupItem(o.optString("code"), o.optString("site"),
+                        o.optString("station"), o.optString("place"),
+                        o.optString("mailNo"), o.optString("img")));
+            }
         } catch (Exception ignored) {}
     }
 

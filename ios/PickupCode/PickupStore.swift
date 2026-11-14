@@ -27,9 +27,34 @@ final class PickupStore: ObservableObject {
     /// 被用户划走删除的码，按站点记：源里还有它就继续藏，源里没有了就自动清掉（下次同码能重新出现）
     private var dismissed: [String: [String]] = [:]
 
+    // MARK: 已拿到 / 已出库
+    /// 拿快递模式里点过的码
+    @Published var picked: Set<String> = []
+    /// 已归档（已取件 / 已出库）
+    @Published var archived: [PickupItem] = []
+    /// 这一站上次还有、这次没了 —— 记下时间，满 10 分钟才归档（驿站偶尔会漏返回一件）
+    @Published var missingSince: [String: Date] = [:]
+    private var archiveNotes: [String: String] = [:]
+    static let missingGrace: TimeInterval = 600
+
     private static let manualKey = "pickup.manual.v2"
     private static let pinnedKey = "pickup.pinned.v1"
     private static let dismissedKey = "pickup.dismissed.v1"
+    private static let pickedKey = "pickup.picked.v1"
+    private static let archivedKey = "pickup.archived.v1"
+    private static let missingKey = "pickup.missing.v1"
+
+    /// 归档条目落盘用
+    private struct ArchivedEntry: Codable {
+        var code: String
+        var site: String
+        var station: String
+        var place: String
+        var mailNo: String?
+        var img: String?
+        var at: Date
+        var note: String?
+    }
 
     // 存档用的最小结构
     private struct ManualEntry: Codable {
@@ -51,6 +76,7 @@ final class PickupStore: ObservableObject {
     init() {
         loadManual()
         loadPrefs()
+        loadArchive()
         republish()
     }
 
@@ -87,6 +113,7 @@ final class PickupStore: ObservableObject {
                 mailNo: mailNo
             ))
         }
+        reconcile(site: site, incoming: collected)
         lastPayload[site] = collected
         pruneDismissed(site)
         republish()
@@ -95,8 +122,109 @@ final class PickupStore: ObservableObject {
     // 原生接口（菜鸟 mtop）整批灌进来
     func ingestNative(site: String, items: [PickupItem], state: String? = nil) {
         if let s = state, !s.isEmpty { siteState[site] = s }
+        reconcile(site: site, incoming: items)
         lastPayload[site] = items
         pruneDismissed(site)
+        republish()
+    }
+
+    // MARK: - 名单比对（少了 → 疑似已出库 → 10 分钟后归档）
+
+    /// 跟这一站上一次抓到的名单比：多了的直接进首页；少了的先打「疑似已出库」标记，
+    /// 过了 10 分钟仍然没回来才真归档（驿站接口偶尔会漏返回一件，不能一消失就删）。
+    private func reconcile(site: String, incoming: [PickupItem]) {
+        let fresh = Set(incoming.map { $0.code })
+        let before = Set((lastPayload[site] ?? []).map { $0.code })
+        for code in before.subtracting(fresh) where missingSince[code] == nil {
+            missingSince[code] = Date()
+        }
+        for code in fresh {
+            missingSince[code] = nil
+            picked.remove(code)   // 又出现在名单里，说明没取走
+        }
+        saveArchive()
+    }
+
+    /// 由 AppModel 的 20 秒定时器调用：把标记超过 10 分钟的归档掉
+    func archiveMissingIfNeeded() {
+        guard !missingSince.isEmpty else { return }
+        let cut = Date().addingTimeInterval(-PickupStore.missingGrace)
+        let due = missingSince.filter { $0.value <= cut }.map { $0.key }
+        guard !due.isEmpty else { return }
+        for code in due {
+            if let it = items.first(where: { $0.code == code }) {
+                archiveNow(it, note: "疑似已出库")
+            } else {
+                missingSince[code] = nil
+            }
+        }
+        saveArchive()
+        republish()
+    }
+
+    func isPicked(_ code: String) -> Bool { picked.contains(code) }
+    func isMissing(_ code: String) -> Bool { missingSince[code] != nil }
+    /// 距归档还剩多少分钟（给列表里的小字用）
+    func missingMinutesLeft(_ code: String) -> Int {
+        guard let t = missingSince[code] else { return 0 }
+        let left = PickupStore.missingGrace - Date().timeIntervalSince(t)
+        return max(0, Int(left / 60))
+    }
+
+    func togglePicked(_ item: PickupItem) {
+        if picked.contains(item.code) {
+            picked.remove(item.code)
+        } else {
+            picked.insert(item.code)
+        }
+        saveArchive()
+        republish()
+    }
+
+    /// 归档一条：从各站 payload / 手动里摘掉，进 archived
+    func archiveNow(_ item: PickupItem, note: String = "已取件") {
+        if item.manual {
+            manualItems.removeAll { $0.code == item.code }
+        }
+        for site in Array(lastPayload.keys) {
+            lastPayload[site] = (lastPayload[site] ?? []).filter { $0.code != item.code }
+        }
+        missingSince[item.code] = nil
+        picked.remove(item.code)
+        archived.removeAll { $0.code == item.code }
+        archived.insert(item, at: 0)
+        if archived.count > 200 { archived.removeLast(archived.count - 200) }
+        archiveNotes[item.code] = note
+        saveArchive()
+        saveManual()
+        republish()
+    }
+
+    /// 拿快递模式收工：把所有「已拿到」的批量归档
+    @discardableResult
+    func archivePicked() -> Int {
+        let targets = items.filter { picked.contains($0.code) }
+        for it in targets {
+            archiveNow(it, note: "已取件")
+        }
+        return targets.count
+    }
+
+    /// 归档区里「放回首页」
+    func restore(_ item: PickupItem) {
+        archived.removeAll { $0.code == item.code }
+        archiveNotes[item.code] = nil
+        if item.manual {
+            manualItems.removeAll { $0.code == item.code }
+            manualItems.append(item)
+        } else {
+            var list = lastPayload[item.site] ?? []
+            list.removeAll { $0.code == item.code }
+            list.append(item)
+            lastPayload[item.site] = list
+        }
+        saveArchive()
+        saveManual()
         republish()
     }
 
@@ -151,6 +279,47 @@ final class PickupStore: ObservableObject {
     private func loadPrefs() {
         pinnedCodes = (UserDefaults.standard.array(forKey: PickupStore.pinnedKey) as? [String]) ?? []
         dismissed = (UserDefaults.standard.dictionary(forKey: PickupStore.dismissedKey) as? [String: [String]]) ?? [:]
+    }
+
+    // MARK: - 已拿到 / 归档 落盘
+
+    private func saveArchive() {
+        let d = UserDefaults.standard
+        d.set(Array(picked), forKey: PickupStore.pickedKey)
+        var stamps: [String: Double] = [:]
+        for (k, v) in missingSince { stamps[k] = v.timeIntervalSince1970 }
+        d.set(stamps, forKey: PickupStore.missingKey)
+        d.set(archiveNotes, forKey: PickupStore.archivedKey + ".notes")
+        let rows: [ArchivedEntry] = archived.map { it in
+            ArchivedEntry(code: it.code, site: it.site, station: it.station,
+                          place: it.place, mailNo: it.mailNo, img: it.img,
+                          at: it.seenAt, note: archiveNotes[it.code])
+        }
+        if let data = try? JSONEncoder().encode(rows) {
+            d.set(data, forKey: PickupStore.archivedKey)
+        }
+    }
+
+    private func loadArchive() {
+        let d = UserDefaults.standard
+        picked = Set((d.array(forKey: PickupStore.pickedKey) as? [String]) ?? [])
+        if let raw = d.dictionary(forKey: PickupStore.missingKey) as? [String: Double] {
+            var m: [String: Date] = [:]
+            for (k, v) in raw { m[k] = Date(timeIntervalSince1970: v) }
+            missingSince = m
+        }
+        archiveNotes = (d.dictionary(forKey: PickupStore.archivedKey + ".notes") as? [String: String]) ?? [:]
+        guard let data = d.data(forKey: PickupStore.archivedKey),
+              let rows = try? JSONDecoder().decode([ArchivedEntry].self, from: data) else { return }
+        archived = rows.map { e in
+            PickupItem(id: e.site + "|" + e.code, site: e.site, code: e.code,
+                       station: e.station, place: e.place, raw: e.note ?? "已出库",
+                       seenAt: e.at, img: e.img ?? "", mailNo: e.mailNo ?? "")
+        }
+    }
+
+    func archiveNote(_ code: String) -> String {
+        archiveNotes[code] ?? "已取件"
     }
 
     // MARK: - 手动 / 识别录入
