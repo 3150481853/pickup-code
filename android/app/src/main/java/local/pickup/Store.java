@@ -151,10 +151,15 @@ public class Store {
     // ---- 手动录入 ----
 
     public boolean addManual(String rawCode, String station, String place) {
+        return addManual(rawCode, station, place, "");
+    }
+
+    public boolean addManual(String rawCode, String station, String place, String mailNo) {
         String code = normalize(rawCode);
         if (!looksLikeCode(code)) return false;
         for (PickupItem it : manual) if (it.code.equals(code)) return false;
-        manual.add(new PickupItem(code, "manual", station, place));
+        manual.add(new PickupItem(code, "manual", station, place,
+                mailNo == null ? "" : mailNo.trim().toUpperCase(), ""));
         saveManual();
         republish();
         return true;
@@ -181,7 +186,18 @@ public class Store {
             if (list == null) continue;
             for (PickupItem it : list) {
                 if (it == null || it.code == null || it.code.isEmpty()) continue;
-                if (seen.contains(it.code)) continue;
+                if (seen.contains(it.code)) {
+                    // 同码已经有了：把空着的驿站/货位/单号补上（手动条目常常只填了码）
+                    for (PickupItem had : out) {
+                        if (!had.code.equals(it.code)) continue;
+                        if (had.station == null || had.station.isEmpty()) had.station = it.station;
+                        if (had.place == null || had.place.isEmpty()) had.place = it.place;
+                        if (had.mailNo == null || had.mailNo.isEmpty()) had.mailNo = it.mailNo;
+                        if (had.img == null || had.img.isEmpty()) had.img = it.img;
+                        break;
+                    }
+                    continue;
+                }
                 seen.add(it.code);
                 out.add(it);
             }
@@ -258,7 +274,8 @@ public class Store {
             for (int i = 0; i < arr.length(); i++) {
                 JSONObject o = arr.getJSONObject(i);
                 manual.add(new PickupItem(o.optString("code"), "manual",
-                        o.optString("station"), o.optString("place")));
+                        o.optString("station"), o.optString("place"),
+                        o.optString("mailNo"), ""));
             }
         } catch (Exception ignored) {}
     }
@@ -271,6 +288,7 @@ public class Store {
                 o.put("code", it.code);
                 o.put("station", it.station);
                 o.put("place", it.place);
+                o.put("mailNo", it.mailNo == null ? "" : it.mailNo);
                 arr.put(o);
             }
             sp.edit().putString("manual.v1", arr.toString()).apply();

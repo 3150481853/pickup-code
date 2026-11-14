@@ -7,9 +7,12 @@ enum CodeOCR {
     struct Result {
         var codes: [String] = []
         var station: String = ""
+        var mailNos: [String] = []   // 截图里认到的快递单号（YT7656364590990 / 611723856155233 这种）
     }
 
     static let codePattern = "(?:[A-Za-z]{1,3}[ \\t]*[-－—–−﹣‑][ \\t]*[0-9]{1,7}|[0-9]{1,4}[ \\t]*[-－—–−][ \\t]*[0-9]{1,7}(?:[ \\t]*[-－—–−][ \\t]*[0-9]{1,7})?)"
+    /// 快递单号：字母前缀 + 8~14 位数字（圆通 YT…、极兔 JT…、顺丰 SF…），或者纯数字 12~18 位（丹鸟/韵达那种）
+    static let mailPattern = "(?<![A-Za-z0-9])(?:[A-Za-z]{2,3}[0-9]{8,14}|[0-9]{12,18})(?![0-9])"
 
     static func scan(_ image: UIImage, completion: @escaping (Result) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
@@ -20,12 +23,20 @@ enum CodeOCR {
             }
             let lines = recognize(cg)
             var seen = Set<String>()
+            var seenNo = Set<String>()
             for line in lines {
                 for raw in matches(in: line) {
                     let code = PickupStore.normalize(raw)
                     if PickupStore.looksLikeCode(code), !seen.contains(code) {
                         seen.insert(code)
                         res.codes.append(code)
+                    }
+                }
+                for raw in mailMatches(in: line) {
+                    let no = raw.uppercased().replacingOccurrences(of: " ", with: "")
+                    if !seenNo.contains(no) {
+                        seenNo.insert(no)
+                        res.mailNos.append(no)
                     }
                 }
                 if res.station.isEmpty, line.contains("驿站") || line.contains("服务中心") {
@@ -77,7 +88,16 @@ enum CodeOCR {
     }
 
     static func matches(in text: String) -> [String] {
-        guard let re = try? NSRegularExpression(pattern: codePattern, options: []) else { return [] }
+        regexHits(text, codePattern)
+    }
+
+    static func mailMatches(in text: String) -> [String] {
+        // 11 位纯数字当手机号排掉，不然快递单号里全是电话号码
+        regexHits(text, mailPattern).filter { !($0.count == 11 && $0.allSatisfy { $0.isNumber }) }
+    }
+
+    static func regexHits(_ text: String, _ pattern: String) -> [String] {
+        guard let re = try? NSRegularExpression(pattern: pattern, options: []) else { return [] }
         let ns = text as NSString
         return re.matches(in: text, options: [], range: NSRange(location: 0, length: ns.length)).map {
             ns.substring(with: $0.range)
@@ -141,6 +161,7 @@ struct AddItemView: View {
     @State private var code = ""
     @State private var station = ""
     @State private var place = ""
+    @State private var mailNo = ""
     @State private var hint = ""
 
     @State private var showLibrary = false
@@ -157,6 +178,10 @@ struct AddItemView: View {
                     TextField("取件码，如 54-4-13021", text: $code)
                         .keyboardType(.numbersAndPunctuation)
                         .autocapitalization(.none)
+                        .disableAutocorrection(true)
+                    TextField("快递单号（可留空，如 YT7656364590990）", text: $mailNo)
+                        .keyboardType(.asciiCapable)
+                        .autocapitalization(.allCharacters)
                         .disableAutocorrection(true)
                     TextField("驿站（可留空）", text: $station)
                     TextField("货位/货架（可留空）", text: $place)
@@ -222,7 +247,7 @@ struct AddItemView: View {
     }
 
     private func saveManual() {
-        if store.addManual(code: code, station: station, place: place) {
+        if store.addManual(code: code, station: station, place: place, mailNo: mailNo) {
             presentationMode.wrappedValue.dismiss()
         } else {
             hint = "这个不像取件码。驿站一般是「数字-数字-数字」（122-3-12020），顺丰是「字母-数字」（B-13016）"
@@ -231,7 +256,8 @@ struct AddItemView: View {
 
     private func saveFound() {
         for c in found {
-            store.addManual(code: c, station: foundStation, place: "")
+            store.addManual(code: c, station: foundStation, place: "",
+                            mailNo: found.count == 1 ? mailNo : "")
         }
         presentationMode.wrappedValue.dismiss()
     }
@@ -245,6 +271,10 @@ struct AddItemView: View {
             found = res.codes
             foundStation = res.station
             if !res.codes.isEmpty && station.isEmpty { station = res.station }
+            // 单号只有一个、码也只有一个时才自动填，免得对错行
+            if mailNo.isEmpty, res.mailNos.count == 1, res.codes.count == 1 {
+                mailNo = res.mailNos[0]
+            }
         }
     }
 }

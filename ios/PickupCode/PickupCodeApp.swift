@@ -526,6 +526,7 @@ struct HomeView: View {
 
     private func cardBody(_ item: PickupItem) -> some View {
         HStack(alignment: .center, spacing: 12) {
+            thumb(item)
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.code)
                     .font(.system(size: 23, weight: .semibold, design: .monospaced))
@@ -547,6 +548,12 @@ struct HomeView: View {
                         .foregroundColor(.secondary)
                         .lineLimit(1)
                 }
+                if !item.mailNo.isEmpty {
+                    Text("单号 " + item.mailNo)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.secondary.opacity(0.9))
+                        .lineLimit(1)
+                }
             }
             Spacer(minLength: 0)
             Image(systemName: "doc.on.doc")
@@ -563,6 +570,32 @@ struct HomeView: View {
             UIPasteboard.general.string = item.code
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
         }
+    }
+
+    /// 左侧主图：菜鸟/拼多多给的快递图或商品图；没图时用站点图标顶一下
+    private func thumb(_ item: PickupItem) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 10).fill(Color.black.opacity(0.06))
+            if !item.img.isEmpty, let u = URL(string: item.img) {
+                AsyncImage(url: u) { phase in
+                    if let img = phase.image {
+                        img.resizable().scaledToFill()
+                    } else {
+                        thumbFallback(item)
+                    }
+                }
+                .frame(width: 54, height: 54)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            } else {
+                thumbFallback(item)
+            }
+        }
+        .frame(width: 54, height: 54)
+    }
+
+    private func thumbFallback(_ item: PickupItem) -> some View {
+        Text(item.site == "pdd" ? "🛒" : (item.site == "cainiao" ? "📦" : "🏷"))
+            .font(.system(size: 24))
     }
 
     private func metaText(_ item: PickupItem) -> String {

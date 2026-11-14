@@ -6,10 +6,12 @@ struct PickupItem: Identifiable, Hashable {
     let id: String          // 站点 + 取件码
     let site: String        // "pdd" / "taobao" / "taobao-id" / "manual"
     let code: String        // 取件码，如 47-4-11026
-    let station: String     // 驿站名
-    let place: String       // 货架号/取件位置
-    let raw: String         // 原始文本，调试与兜底展示
+    var station: String     // 驿站名
+    var place: String       // 货架号/取件位置
+    var raw: String         // 原始文本，调试与兜底展示
     let seenAt: Date
+    var img: String = ""       // 左侧主图（商品图 / 快递公司图标），没取到就是空
+    var mailNo: String = ""    // 快递单号，如 YT7656364590990
     var manual: Bool = false   // 手动录入 / 截图识别进来的
 }
 
@@ -35,6 +37,8 @@ final class PickupStore: ObservableObject {
         var station: String
         var place: String
         var seenAt: Date
+        var mailNo: String? = nil
+        var img: String? = nil
     }
 
     static let siteName: [String: String] = [
@@ -68,6 +72,8 @@ final class PickupStore: ObservableObject {
             let station = (r["station"] as? String) ?? ""
             let place = (r["place"] as? String) ?? ""
             let rawText = (r["raw"] as? String) ?? ""
+            let img = (r["img"] as? String) ?? ""
+            let mailNo = (r["mailNo"] as? String) ?? ""
             if code.isEmpty { continue }
             collected.append(PickupItem(
                 id: "\(site)|\(code)",
@@ -76,7 +82,9 @@ final class PickupStore: ObservableObject {
                 station: station,
                 place: place,
                 raw: rawText,
-                seenAt: Date()
+                seenAt: Date(),
+                img: img,
+                mailNo: mailNo
             ))
         }
         lastPayload[site] = collected
@@ -168,9 +176,11 @@ final class PickupStore: ObservableObject {
     }
 
     @discardableResult
-    func addManual(code rawCode: String, station: String = "", place: String = "") -> Bool {
+    func addManual(code rawCode: String, station: String = "", place: String = "",
+                   mailNo: String = "") -> Bool {
         let code = PickupStore.normalize(rawCode)
         guard PickupStore.looksLikeCode(code) else { return false }
+        let no = mailNo.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         manualItems.removeAll { $0.code == code }
         manualItems.append(PickupItem(
             id: "manual|\(code)",
@@ -180,6 +190,7 @@ final class PickupStore: ObservableObject {
             place: place.trimmingCharacters(in: .whitespacesAndNewlines),
             raw: "手动录入",
             seenAt: Date(),
+            mailNo: no,
             manual: true
         ))
         saveManual()
@@ -194,7 +205,8 @@ final class PickupStore: ObservableObject {
     }
 
     private func saveManual() {
-        let rows = manualItems.map { ManualEntry(code: $0.code, station: $0.station, place: $0.place, seenAt: $0.seenAt) }
+        let rows = manualItems.map { ManualEntry(code: $0.code, station: $0.station, place: $0.place,
+                                                 seenAt: $0.seenAt, mailNo: $0.mailNo, img: $0.img) }
         if let data = try? JSONEncoder().encode(rows) {
             UserDefaults.standard.set(data, forKey: PickupStore.manualKey)
         }
@@ -206,7 +218,8 @@ final class PickupStore: ObservableObject {
         manualItems = rows.map {
             PickupItem(id: "manual|\($0.code)", site: "manual", code: $0.code,
                        station: $0.station, place: $0.place, raw: "手动录入",
-                       seenAt: $0.seenAt, manual: true)
+                       seenAt: $0.seenAt, img: $0.img ?? "", mailNo: $0.mailNo ?? "",
+                       manual: true)
         }
     }
 
@@ -224,8 +237,12 @@ final class PickupStore: ObservableObject {
         for site in ["cainiao", "pdd", "taobao"] {
             for it in lastPayload[site] ?? [] {
                 if var had = byCode[it.code] {
-                    if had.station.isEmpty && !it.station.isEmpty { had = PickupItem(id: had.id, site: had.site, code: had.code, station: it.station, place: had.place, raw: had.raw, seenAt: had.seenAt, manual: had.manual) }
-                    if had.place.isEmpty && !it.place.isEmpty { had = PickupItem(id: had.id, site: had.site, code: had.code, station: had.station, place: it.place, raw: had.raw, seenAt: had.seenAt, manual: had.manual) }
+                    // 手动的优先，缺的字段用抓到的补
+                    if had.station.isEmpty { had.station = it.station }
+                    if had.place.isEmpty { had.place = it.place }
+                    if had.img.isEmpty { had.img = it.img }
+                    if had.mailNo.isEmpty { had.mailNo = it.mailNo }
+                    if had.raw.isEmpty { had.raw = it.raw }
                     byCode[it.code] = had
                 } else {
                     byCode[it.code] = it

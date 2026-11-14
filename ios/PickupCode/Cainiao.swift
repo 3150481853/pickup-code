@@ -56,6 +56,43 @@ enum Cainiao {
             return s.range(of: "^[A-Za-z]?[0-9]{1,3}-[0-9]{1,3}$", options: .regularExpression) != nil
         }
 
+        /// 商品主图：接口里的图基本都在 alicdn 上，认 http(s) + 图片后缀/常见图床
+        static func imgOf(_ cand: [String]) -> String {
+            var fallback = ""
+            for s in cand {
+                let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard t.hasPrefix("http"), t.count > 18, t.count < 500 else { continue }
+                let low = t.lowercased()
+                if low.hasSuffix(".jpg") || low.hasSuffix(".jpeg") || low.hasSuffix(".png")
+                    || low.hasSuffix(".webp") || low.contains("alicdn.com/img")
+                    || low.contains("img.alicdn") || low.contains("gw.alicdn") {
+                    return t
+                }
+                if fallback.isEmpty { fallback = t }
+            }
+            return fallback
+        }
+
+        /// 快递单号：YT7656364590990 / JT3184428901216，或 12~18 位纯数字（丹鸟/韵达那种）
+        static let mailPattern = "(?<![A-Za-z0-9])(?:[A-Z]{2,3}[0-9]{8,14}|[0-9]{12,18})(?![0-9])"
+
+        static func mailNoOf(_ cand: [String]) -> String {
+            var loose = ""
+            for s in cand {
+                let t = s.uppercased()
+                let ns = t as NSString
+                guard let re = try? NSRegularExpression(pattern: mailPattern) else { return loose }
+                for m in re.matches(in: t, options: [], range: NSRange(location: 0, length: ns.length)) {
+                    let no = ns.substring(with: m.range)
+                    // 11 位纯数字基本都是手机号，跳过
+                    if no.count == 11 && no.allSatisfy({ $0.isNumber }) { continue }
+                    if no.range(of: "^[A-Z]{2,3}[0-9]+$", options: .regularExpression) != nil { return no }
+                    if loose.isEmpty { loose = no }
+                }
+            }
+            return loose
+        }
+
         static func items(from root: Any?) -> [PickupItem] {
             var out: [PickupItem] = []
             var seen: Set<String> = []
@@ -86,7 +123,9 @@ enum Cainiao {
                         out.append(PickupItem(id: "cainiao|" + hit, site: "cainiao", code: hit,
                                               station: station, place: place,
                                               raw: String(rest.joined(separator: " / ").prefix(120)),
-                                              seenAt: Date()))
+                                              seenAt: Date(),
+                                              img: imgOf(cand),
+                                              mailNo: mailNoOf(cand)))
                     }
                 }
                 for v in dict.values {

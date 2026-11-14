@@ -31,6 +31,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -287,6 +288,30 @@ public class MainActivity extends Activity {
         card.setBackground(bg);
         card.setPadding(dp(14), dp(12), dp(12), dp(12));
 
+        // 左侧主图（菜鸟的快递图 / 拼多多的商品图），没图就用站点图标顶着
+        FrameLayout thumbBox = new FrameLayout(this);
+        GradientDrawable tbg0 = new GradientDrawable();
+        tbg0.setColor(Color.rgb(240, 240, 244));
+        tbg0.setCornerRadius(dp(10));
+        thumbBox.setBackground(tbg0);
+        TextView thumbFallback = new TextView(this);
+        thumbFallback.setText("pdd".equals(it.site) ? "🛒" : ("cainiao".equals(it.site) ? "📦" : "🏷"));
+        thumbFallback.setTextSize(22);
+        thumbFallback.setGravity(Gravity.CENTER);
+        thumbBox.addView(thumbFallback, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        if (it.img != null && !it.img.isEmpty()) {
+            ImageView thumbImg = new ImageView(this);
+            thumbImg.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            thumbBox.addView(thumbImg, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            loadThumb(thumbImg, thumbFallback, it.img);
+        }
+        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(dp(54), dp(54));
+        tlp.rightMargin = dp(11);
+        tlp.gravity = Gravity.CENTER_VERTICAL;
+        card.addView(thumbBox, tlp);
+
         LinearLayout left = new LinearLayout(this);
         left.setOrientation(LinearLayout.VERTICAL);
 
@@ -296,7 +321,6 @@ public class MainActivity extends Activity {
         code.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
         code.setTextColor(INK);
         left.addView(code);
-
         LinearLayout meta = new LinearLayout(this);
         meta.setOrientation(LinearLayout.HORIZONTAL);
         meta.setGravity(Gravity.CENTER_VERTICAL);
@@ -339,6 +363,17 @@ public class MainActivity extends Activity {
             meta.addView(mv);
         }
         left.addView(meta);
+
+        if (it.mailNo != null && !it.mailNo.isEmpty()) {
+            TextView mn = new TextView(this);
+            mn.setText("单号 " + it.mailNo);
+            mn.setTextSize(11);
+            mn.setTypeface(Typeface.MONOSPACE);
+            mn.setTextColor(GREY);
+            mn.setPadding(0, dp(1), 0, 0);
+            mn.setMaxLines(1);
+            left.addView(mn);
+        }
         card.addView(left, new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
@@ -900,7 +935,8 @@ public class MainActivity extends Activity {
                         String code = Store.normalize(it.optString("code", ""));
                         if (code.isEmpty()) continue;
                         list.add(new PickupItem(code, site,
-                                it.optString("station", ""), it.optString("place", "")));
+                                it.optString("station", ""), it.optString("place", ""),
+                                it.optString("mailNo", ""), it.optString("img", "")));
                     }
                 }
                 final int n = list.size();
@@ -918,6 +954,46 @@ public class MainActivity extends Activity {
     void copy(String s) {
         ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         cm.setPrimaryClip(ClipData.newPlainText("code", s));
+    }
+
+    /** 主图小缓存，避免列表滚动反复下载 */
+    static final java.util.LinkedHashMap<String, android.graphics.Bitmap> THUMBS =
+            new java.util.LinkedHashMap<String, android.graphics.Bitmap>(32, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(
+                        java.util.Map.Entry<String, android.graphics.Bitmap> eldest) {
+                    return size() > 80;
+                }
+            };
+
+    /** 主图异步加载：下到就把兜底图标藏掉，失败就保持图标 */
+    void loadThumb(final ImageView iv, final View fallback, final String url) {
+        android.graphics.Bitmap cached;
+        synchronized (THUMBS) { cached = THUMBS.get(url); }
+        if (cached != null) {
+            fallback.setVisibility(View.GONE);
+            iv.setImageBitmap(cached);
+            return;
+        }
+        new Thread(() -> {
+            try {
+                java.net.HttpURLConnection c =
+                        (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+                c.setConnectTimeout(6000);
+                c.setReadTimeout(9000);
+                c.setRequestProperty("User-Agent", safariUA());
+                c.setRequestProperty("Referer", "https://m.pinduoduo.net/");
+                java.io.InputStream in = c.getInputStream();
+                android.graphics.Bitmap b = android.graphics.BitmapFactory.decodeStream(in);
+                in.close();
+                if (b == null) return;
+                synchronized (THUMBS) { THUMBS.put(url, b); }
+                runOnUiThread(() -> {
+                    fallback.setVisibility(View.GONE);
+                    iv.setImageBitmap(b);
+                });
+            } catch (Exception ignored) {}
+        }).start();
     }
 
     void showAddDialog() {
@@ -960,6 +1036,11 @@ public class MainActivity extends Activity {
         station.setHint("驿站 / 位置（可不填）");
         box.addView(station);
 
+        EditText mail = new EditText(this);
+        mail.setHint("快递单号（可不填，如 YT7656364590990）");
+        mail.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
+        box.addView(mail);
+
         LinearLayout row2 = new LinearLayout(this);
         row2.setOrientation(LinearLayout.HORIZONTAL);
         row2.setPadding(0, dp(12), 0, dp(2));
@@ -982,7 +1063,8 @@ public class MainActivity extends Activity {
         cancel.setOnClickListener(v -> dlg.dismiss());
         add.setOnClickListener(v -> {
             boolean ok = store.addManual(code.getText().toString(),
-                    station.getText().toString().trim(), "");
+                    station.getText().toString().trim(), "",
+                    mail.getText().toString().trim());
             Toast.makeText(this, ok ? "已添加" : "格式不对或重复了", Toast.LENGTH_SHORT).show();
             if (ok) dlg.dismiss();
         });
@@ -998,6 +1080,10 @@ public class MainActivity extends Activity {
 
     static final Pattern STATION_RE = Pattern.compile(
             "([\\u4e00-\\u9fa5A-Za-z0-9·（）()]{2,14}(?:驿站|快递柜|服务站|自提点))");
+
+    /** 快递单号：字母前缀 + 8~14 位数字（YT…/JT…/SF…），或 12~18 位纯数字 */
+    static final Pattern MAIL_RE = Pattern.compile(
+            "(?<![A-Za-z0-9])(?:[A-Za-z]{2,3}[0-9]{8,14}|[0-9]{12,18})(?![0-9])");
 
     private File pendingShot;
 
@@ -1082,6 +1168,16 @@ public class MainActivity extends Activity {
         if (sm.find()) station = sm.group(1);
         final String st = station;
 
+        // 顺带认快递单号：YT…/JT…/SF… 这种前缀式，或 12~18 位纯数字（11 位当手机号排掉）
+        final List<String> mails = new ArrayList<>();
+        Matcher mm = MAIL_RE.matcher(text);
+        while (mm.find()) {
+            String no = mm.group().toUpperCase();
+            if (no.length() == 11 && no.matches("[0-9]+")) continue;
+            if (!mails.contains(no)) mails.add(no);
+        }
+        final String mail = (found.size() == 1 && mails.size() == 1) ? mails.get(0) : "";
+
         final boolean[] sel = new boolean[found.size()];
         for (int i = 0; i < sel.length; i++) sel[i] = true;
 
@@ -1092,7 +1188,7 @@ public class MainActivity extends Activity {
                 .setPositiveButton("加入首页", (d, w) -> {
                     int n = 0;
                     for (int i = 0; i < found.size(); i++) {
-                        if (sel[i] && store.addManual(found.get(i), st, "")) n++;
+                        if (sel[i] && store.addManual(found.get(i), st, "", mail)) n++;
                     }
                     toast(n > 0 ? ("已加入 " + n + " 个") : "这些都已经在列表里了");
                 })

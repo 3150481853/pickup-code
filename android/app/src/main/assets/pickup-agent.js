@@ -115,7 +115,7 @@
         } catch (e) { /* 浏览器里调试时忽略 */ }
     }
 
-    function pushUnique(out, seen, code, station, place, raw) {
+    function pushUnique(out, seen, code, station, place, raw, img, mailNo) {
         if (!code) { return; }
         code = String(code).replace(/[－—–−]/g, '-').replace(/\s+/g, '');
         if (seen[code]) { return; }
@@ -124,8 +124,50 @@
             code: code,
             station: station || '',
             place: place || '',
-            raw: raw || ''
+            raw: raw || '',
+            img: img || '',
+            mailNo: mailNo || ''
         });
+    }
+
+    // 快递单号：拼多多卡片上写着「圆通速递 YT7656364590990」「丹鸟 611723856155233」。
+    // 排除 11 位（手机号）和带横杠的（那是取件码）。
+    function mailNoOf(text) {
+        var t = norm(text || '');
+        var re = /\b([A-Z]{2,3}\d{8,14}|\d{12,18})\b/g;
+        var m, best = '';
+        while ((m = re.exec(t))) {
+            var v = m[1];
+            if (/^\d{11}$/.test(v)) { continue; }
+            if (!best) { best = v; }
+            if (/^(YT|JT|SF|JD|ZT|YD|DB|DP|EMS)/i.test(v)) { best = v; break; }
+        }
+        return best;
+    }
+
+    // 每条左侧的主图：优先 <img>，其次 background-image。
+    // 阿里/拼多多的图常常是相对路径或 //img.xxx，这里统一补成绝对地址。
+    function imgOf(node) {
+        if (!node) { return ''; }
+        var best = '';
+        var imgs = node.querySelectorAll ? node.querySelectorAll('img') : [];
+        for (var i = 0; i < imgs.length; i++) {
+            var s = imgs[i].getAttribute('src') || imgs[i].getAttribute('data-src') || '';
+            if (!s || /^data:/.test(s)) { continue; }
+            if (!best) { best = s; }
+            if (/alicdn|hdslb|pddpic|picasso|\.(jpg|jpeg|png|webp)/i.test(s)) { best = s; break; }
+        }
+        if (!best) {
+            var all = node.querySelectorAll ? node.querySelectorAll('div,span,a') : [];
+            for (var j = 0; j < all.length && j < 60; j++) {
+                var bg = '';
+                try { bg = window.getComputedStyle(all[j]).backgroundImage || ''; } catch (e) { bg = ''; }
+                var m = bg.match(/url\(["']?(https?:\/\/[^"')]+)/);
+                if (m) { best = m[1]; break; }
+            }
+        }
+        if (!best) { return ''; }
+        try { return new URL(best, location.href).href; } catch (e) { return best; }
     }
 
     // ---- 拼多多：官方结构 ----
@@ -170,7 +212,9 @@
             pushUnique(out, seen, m[0],
                 st ? norm(st.textContent) : listStation,
                 tags ? cleanPlace(tags.textContent) : '',
-                raw.length > 90 ? raw.slice(0, 90) : raw);
+                raw.length > 90 ? raw.slice(0, 90) : raw,
+                imgOf(n),
+                mailNoOf(raw));
         }
         // 兜底：还是没驿站名的，统一补上列表头那个
         if (listStation) {
@@ -201,17 +245,21 @@
         Object.keys(best).forEach(function (code) {
             var el = best[code].el;
             var ctx = norm(el.innerText || el.textContent);
+            var card = el;
             var a = el.parentElement;
             for (var hop = 0; a && hop < 5; hop++, a = a.parentElement) {
                 var at = norm(a.innerText || a.textContent);
                 if (!at || at.length > 120) { break; }
                 if ((at.match(CODE_G) || []).length > 1) { break; }  // 再往上就是列表了
                 ctx = at;
+                card = a;
             }
             var sm = ctx.match(STATION);
             var pm = ctx.match(PLACE);
             pushUnique(out, seen, code, sm ? sm[1] : '', pm ? norm(pm[1]) : '',
-                ctx.length > 90 ? ctx.slice(0, 90) : ctx);
+                ctx.length > 90 ? ctx.slice(0, 90) : ctx,
+                imgOf(card),
+                mailNoOf(ctx));
         });
         return out;
     }
@@ -235,6 +283,8 @@
                     if (items[k].code !== g.code) { continue; }
                     if (!items[k].station && g.station) { items[k].station = g.station; }
                     if (!items[k].place && g.place) { items[k].place = g.place; }
+                    if (!items[k].img && g.img) { items[k].img = g.img; }
+                    if (!items[k].mailNo && g.mailNo) { items[k].mailNo = g.mailNo; }
                 }
             }
         }

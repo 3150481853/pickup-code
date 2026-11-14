@@ -194,7 +194,8 @@ public class Mtop {
                 // 驿站名常常藏在 feature / feature2 里那层转义过的 JSON（postName / daishouName）
                 List<String> cand = new ArrayList<>();
                 collect(o, cand, 0);
-                out.add(new PickupItem(code, "cainiao", stationOf(cand), placeOf(cand)));
+                out.add(new PickupItem(code, "cainiao", stationOf(cand), placeOf(cand),
+                        mailNoOf(cand), imgOf(cand)));
             }
             for (java.util.Iterator<String> it = o.keys(); it.hasNext(); ) {
                 Object v = o.opt(it.next());
@@ -240,6 +241,27 @@ public class Mtop {
                 if (v instanceof String) {
                     String s = ((String) v).trim();
                     if (s.length() >= 2 && s.startsWith("{") && s.endsWith("}")) {
+                        try { collect(new JSONObject(s), out, depth + 1); continue; }
+                        catch (Exception ignored) {}
+                    }
+                    if (s.length() >= 2 && s.startsWith("[") && s.endsWith("]")) {
+                        try { collectArray(new JSONArray(s), out, depth + 1); continue; }
+                        catch (Exception ignored) {}
+                    }
+                    out.add(s);
+                }
+            }
+        }
+
+        static void collectArray(JSONArray arr, List<String> out, int depth) {
+            if (depth > 2) return;
+            for (int i = 0; i < arr.length(); i++) {
+                Object v = arr.opt(i);
+                if (v instanceof JSONObject) collect((JSONObject) v, out, depth + 1);
+                else if (v instanceof JSONArray) collectArray((JSONArray) v, out, depth + 1);
+                else if (v instanceof String) {
+                    String s = ((String) v).trim();
+                    if (s.startsWith("{") && s.endsWith("}")) {
                         try { collect(new JSONObject(s), out, depth + 1); continue; }
                         catch (Exception ignored) {}
                     }
@@ -292,6 +314,41 @@ public class Mtop {
                 }
             }
             return "";
+        }
+
+        /** 快递单号：YT7656364590990 / JT3184428901216 这种，或 12~18 位纯数字 */
+        static final java.util.regex.Pattern MAIL = java.util.regex.Pattern.compile(
+                "(?<![A-Za-z0-9])(?:[A-Z]{2,3}[0-9]{8,14}|[0-9]{12,18})(?![0-9])");
+
+        static String mailNoOf(List<String> cand) {
+            String loose = "";
+            for (String s : cand) {
+                if (s == null || s.isEmpty()) continue;
+                java.util.regex.Matcher m = MAIL.matcher(s.toUpperCase());
+                while (m.find()) {
+                    String no = m.group();
+                    if (no.length() == 11) continue;   // 手机号
+                    if (no.matches("[A-Z]{2,3}[0-9]+")) return no;   // 带前缀的更可信
+                    if (loose.isEmpty()) loose = no;
+                }
+            }
+            return loose;
+        }
+
+        /** 主图：挑一个像图片的绝对地址 */
+        static String imgOf(List<String> cand) {
+            String first = "";
+            for (String s : cand) {
+                if (s == null) continue;
+                String t = s.trim();
+                if (!t.startsWith("http") || t.length() < 18 || t.length() > 500) continue;
+                String low = t.toLowerCase();
+                boolean looks = low.contains(".jpg") || low.contains(".jpeg") || low.contains(".png")
+                        || low.contains(".webp") || low.contains("alicdn") || low.contains("img.");
+                if (looks) return t;
+                if (first.isEmpty()) first = t;
+            }
+            return first;
         }
     }
 }
