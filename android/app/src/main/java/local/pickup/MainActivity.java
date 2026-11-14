@@ -5,6 +5,8 @@ import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.Intent;
+import android.net.Uri;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -13,6 +15,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
+import android.provider.MediaStore;
 import android.text.InputType;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -31,14 +34,20 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.google.mlkit.vision.common.InputImage;
+import com.google.mlkit.vision.text.TextRecognition;
+import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.InputStream;
 import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * 安卓版：和 iOS 版同一套思路 —— 网页只当登录 + 兜底抓取，菜鸟的取包裹列表走原生 mtop。
@@ -662,7 +671,33 @@ public class MainActivity extends Activity {
     void showAddDialog() {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(18), dp(10), dp(18), 0);
+        box.setPadding(dp(18), dp(10), dp(18), dp(6));
+
+        TextView tip = new TextView(this);
+        tip.setText("截图里的取件码可以直接识别：选一张相册里的截图，或者现在拍一张");
+        tip.setTextSize(12);
+        tip.setTextColor(GREY);
+        tip.setLineSpacing(dp(2), 1f);
+        box.addView(tip);
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setPadding(0, dp(10), 0, dp(4));
+        TextView pick = pill("从图库选图", RED, Color.WHITE);
+        TextView shot = pill("拍一张", INK, Color.rgb(0, 0, 0));
+        row.addView(pick);
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        slp.leftMargin = dp(8);
+        row.addView(shot, slp);
+        box.addView(row);
+
+        TextView or = new TextView(this);
+        or.setText("或者手打");
+        or.setTextSize(12);
+        or.setTextColor(GREY);
+        or.setPadding(0, dp(8), 0, dp(2));
+        box.addView(or);
 
         EditText code = new EditText(this);
         code.setHint("取件码，如 122-3-12020 或 B-13016");
@@ -673,16 +708,134 @@ public class MainActivity extends Activity {
         station.setHint("驿站 / 位置（可不填）");
         box.addView(station);
 
-        new AlertDialog.Builder(this)
-                .setTitle("手动添加取件码")
+        LinearLayout row2 = new LinearLayout(this);
+        row2.setOrientation(LinearLayout.HORIZONTAL);
+        row2.setPadding(0, dp(12), 0, dp(2));
+        TextView cancel = pill("取消", GREY, Color.rgb(0, 0, 0));
+        TextView add = pill("添加", RED, Color.WHITE);
+        row2.addView(cancel);
+        LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        alp.leftMargin = dp(8);
+        row2.addView(add, alp);
+        box.addView(row2);
+
+        AlertDialog dlg = new AlertDialog.Builder(this)
+                .setTitle("添加取件码")
                 .setView(box)
-                .setPositiveButton("添加", (d, w) -> {
-                    boolean ok = store.addManual(code.getText().toString(),
-                            station.getText().toString().trim(), "");
-                    Toast.makeText(this, ok ? "已添加" : "格式不对或重复了", Toast.LENGTH_SHORT).show();
+                .create();
+
+        pick.setOnClickListener(v -> { dlg.dismiss(); pickImage(); });
+        shot.setOnClickListener(v -> { dlg.dismiss(); shotImage(); });
+        cancel.setOnClickListener(v -> dlg.dismiss());
+        add.setOnClickListener(v -> {
+            boolean ok = store.addManual(code.getText().toString(),
+                    station.getText().toString().trim(), "");
+            Toast.makeText(this, ok ? "已添加" : "格式不对或重复了", Toast.LENGTH_SHORT).show();
+            if (ok) dlg.dismiss();
+        });
+        dlg.show();
+    }
+
+    // ---------------- 截图识别 ----------------
+
+    static final int REQ_PICK = 101, REQ_SHOT = 102;
+
+    static final Pattern CODE_LOOSE = Pattern.compile(
+            "[0-9A-Za-z]{1,4}\\s*[-－—–−]\\s*[0-9]{1,7}(?:\\s*[-－—–−]\\s*[0-9]{1,7})?");
+
+    static final Pattern STATION_RE = Pattern.compile(
+            "([\\u4e00-\\u9fa5A-Za-z0-9·（）()]{2,14}(?:驿站|快递柜|服务站|自提点))");
+
+    private File pendingShot;
+
+    void pickImage() {
+        try {
+            Intent i = new Intent(Intent.ACTION_GET_CONTENT);
+            i.setType("image/*");
+            i.addCategory(Intent.CATEGORY_OPENABLE);
+            startActivityForResult(Intent.createChooser(i, "选一张取件列表截图"), REQ_PICK);
+        } catch (Exception e) {
+            toast("这台机没有能挑图片的应用");
+        }
+    }
+
+    void shotImage() {
+        try {
+            File f = new File(ShotProvider.dir(this), "shot_" + System.currentTimeMillis() + ".jpg");
+            pendingShot = f;
+            Uri out = ShotProvider.uriFor(this, f.getName());
+            Intent i = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+            i.putExtra(MediaStore.EXTRA_OUTPUT, out);
+            i.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivityForResult(i, REQ_SHOT);
+        } catch (Exception e) {
+            toast("打不开相机");
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int req, int res, Intent data) {
+        super.onActivityResult(req, res, data);
+        if (res != RESULT_OK) return;
+        Uri uri = null;
+        if (req == REQ_PICK && data != null) uri = data.getData();
+        if (req == REQ_SHOT && pendingShot != null && pendingShot.length() > 0) uri = Uri.fromFile(pendingShot);
+        if (uri != null) ocr(uri);
+    }
+
+    void ocr(Uri uri) {
+        final InputImage img;
+        try {
+            img = InputImage.fromFilePath(this, uri);
+        } catch (Exception e) {
+            toast("这张图读不了");
+            return;
+        }
+        toast("识别中…");
+        TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
+                .process(img)
+                .addOnSuccessListener(t -> showOcrResult(t.getText()))
+                .addOnFailureListener(e -> toast("识别失败：" + e.getMessage()));
+    }
+
+    void showOcrResult(String raw) {
+        final List<String> found = new ArrayList<>();
+        String text = raw == null ? "" : raw;
+        Matcher m = CODE_LOOSE.matcher(text);
+        while (m.find()) {
+            String c = Store.normalize(m.group());
+            if (!c.isEmpty() && Store.looksLikeCode(c) && !found.contains(c)) found.add(c);
+        }
+        if (found.isEmpty()) {
+            toast("没认出取件码，换张清楚点的图试试");
+            return;
+        }
+        String station = "";
+        Matcher sm = STATION_RE.matcher(text);
+        if (sm.find()) station = sm.group(1);
+        final String st = station;
+
+        final boolean[] sel = new boolean[found.size()];
+        for (int i = 0; i < sel.length; i++) sel[i] = true;
+
+        new AlertDialog.Builder(this)
+                .setTitle("认出 " + found.size() + " 个取件码")
+                .setMultiChoiceItems(found.toArray(new String[0]), sel,
+                        (d, which, checked) -> sel[which] = checked)
+                .setPositiveButton("加入首页", (d, w) -> {
+                    int n = 0;
+                    for (int i = 0; i < found.size(); i++) {
+                        if (sel[i] && store.addManual(found.get(i), st, "")) n++;
+                    }
+                    toast(n > 0 ? ("已加入 " + n + " 个") : "这些都已经在列表里了");
                 })
                 .setNegativeButton("取消", null)
                 .show();
+    }
+
+    void toast(String s) {
+        Toast.makeText(this, s, Toast.LENGTH_SHORT).show();
     }
 
     void showDiag() {

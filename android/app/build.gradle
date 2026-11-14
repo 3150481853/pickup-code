@@ -10,8 +10,8 @@ android {
         applicationId "local.pickup.android"
         minSdk 24
         targetSdk 34
-        versionCode 14
-        versionName "0.10.1"
+        versionCode 15
+        versionName "0.11.0"
     }
 
     signingConfigs {
@@ -39,4 +39,9 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+}
+
+dependencies {
+    // 图片文字识别（中文/英文，离线模型随 APK 一起打包，不需要联网）
+    implementation 'com.google.mlkit:text-recognition-chinese:16.0.0'
 }
