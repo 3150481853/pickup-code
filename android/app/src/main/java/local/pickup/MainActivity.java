@@ -793,7 +793,7 @@ public class MainActivity extends Activity {
             return;
         }
         toast("识别中…");
-        TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
+        TextRecognition.getClient(new ChineseTextRecognizerOptions.Builder().build())
                 .process(img)
                 .addOnSuccessListener(t -> showOcrResult(t.getText()))
                 .addOnFailureListener(e -> toast("识别失败：" + e.getMessage()));
