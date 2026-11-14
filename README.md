@@ -117,6 +117,7 @@ pinduoduo://com.xunmeng.pinduoduo/mdkd/package?tab=ID_CODE
 
 | 版本 | 日期 | 改了什么 |
 | --- | --- | --- |
+| 0.8.0 | 2026-11-14 | 给淘宝/菜鸟的 WebView 换 **Safari 版 UA**（WKWebView 默认 UA 没有 `Safari/604.1`，阿里系据此判定「App 内嵌 WebView」→ 登录降级、走不完整）；诊断页改成按域名统计 cookie + 点名检查 `cookie2/_tb_token_/unb` 等会话 cookie；新增 mtop 返回码记录（`acs.m.taobao.com` 的 `ret`），用来区分「没登录」和「登录了但接口拒」 |
 | 0.7.0 | 2026-11-14 | 新增「菜鸟取件」标签：菜鸟官方 H5 取包裹页 `page.cainiao.com/xiniao-web/xn-h5-gg-tab-closed-takeParcel/#/`（内部调 `mtop.cainiao.lpc.packageservice.xiniao.querypacklist`），未登录时是「包裹加载中…」骨架屏，需淘宝整页登录；「身份码」标签按用户要求撤掉 |
 | 0.6.0 | 2026-11-14 | 首页加「＋ 添加」：能手动输入取件码，也能选相册截图/拍照，用系统 Vision 在本机 OCR 抠出所有取件码一键加入；手动录入会持久保存（标「手动」并可删除） |
 | 0.5.0 | 2026-11-14 | 「菜鸟码」标签换成淘宝「代收身份码」——菜鸟那页在壳里只会弹「用菜鸟App扫码添加」，网页端没绑定入口；淘宝这页同域、登录态直接可用 |

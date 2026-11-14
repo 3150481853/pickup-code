@@ -38,6 +38,68 @@
         });
     } catch (e) { /* 忽略 */ }
 
+    // 阿里系接口（mtop）的返回码：淘宝/菜鸟都是先打 acs.m.taobao.com 拿数据，
+    // 诊断时能一眼区分「压根没登录」和「登录了但接口拒了」。
+    var MTOP = [];
+    function recordMtop(api, text) {
+        var item = { api: String(api || '').slice(0, 80), ret: '', data: '' };
+        try {
+            var o = JSON.parse(text || '');
+            if (o && o.ret) { item.ret = [].concat(o.ret).join(' | ').slice(0, 140); }
+            var d = o && o.data;
+            if (d && typeof d === 'object') {
+                item.data = Object.keys(d).slice(0, 8).join(',');
+                var pk = d.packages || d.packageList || d.packList || d.list;
+                if (pk && typeof pk.length === 'number') { item.data += ' n=' + pk.length; }
+            } else if (typeof d === 'string') {
+                item.data = d.slice(0, 100);
+            }
+        } catch (e) {
+            item.ret = 'not-json';
+            item.data = String(text || '').slice(0, 100);
+        }
+        MTOP.push(item);
+        if (MTOP.length > 10) { MTOP.shift(); }
+    }
+    function apiOf(u) {
+        var m = String(u || '').match(/api=([A-Za-z0-9_.]+)/);
+        return m ? m[1] : String(u || '').slice(0, 60);
+    }
+    try {
+        var _open = XMLHttpRequest.prototype.open;
+        XMLHttpRequest.prototype.open = function (m, u) {
+            try { this.__mtopUrl = String(u || '').indexOf('acs.m.taobao.com') >= 0 ? String(u) : ''; } catch (e) {}
+            return _open.apply(this, arguments);
+        };
+        var _send = XMLHttpRequest.prototype.send;
+        XMLHttpRequest.prototype.send = function () {
+            var xhr = this;
+            if (xhr.__mtopUrl) {
+                xhr.addEventListener('loadend', function () {
+                    try { recordMtop(apiOf(xhr.__mtopUrl), xhr.responseText); } catch (e) {}
+                });
+            }
+            return _send.apply(this, arguments);
+        };
+    } catch (e) { /* 忽略 */ }
+    try {
+        var _fetch = window.fetch;
+        if (typeof _fetch === 'function') {
+            window.fetch = function (input) {
+                var u = typeof input === 'string' ? input : ((input && input.url) || '');
+                var p = _fetch.apply(this, arguments);
+                if (String(u).indexOf('acs.m.taobao.com') >= 0) {
+                    try {
+                        p.then(function (r) { return r.clone().text(); })
+                         .then(function (t) { recordMtop(apiOf(u), t); })
+                         .catch(function () {});
+                    } catch (e) {}
+                }
+                return p;
+            };
+        }
+    } catch (e) { /* 忽略 */ }
+
     function norm(s) {
         return (s || '').replace(/[\s\u200b]+/g, ' ').trim();
     }
@@ -184,6 +246,7 @@
             frames: frames,
             items: collect(),
             map: window.__pddMap || null,
+            mtop: MTOP,
             console: CONSOLE,
             ua: (navigator.userAgent || '').slice(0, 120)
         };

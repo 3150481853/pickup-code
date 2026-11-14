@@ -78,6 +78,17 @@ enum Sites {
                  autoReturnAfterLogin: true,
                  hint: "要点「整页登录」登一次淘宝；登录后这里就是菜鸟「取包裹」原文列表")
     ]
+
+    // WKWebView 默认 UA 结尾是 "Mobile/15E148"，**没有 "Safari/604.1" 这一段**。
+    // 阿里系的页面（淘宝登录、菜鸟取件）看到这个 UA 就认定「这是某个 App 的内嵌 WebView」，
+    // 于是把登录降级成扫码/引导下载 App，登录流程根本走不完 → 于是永远未登录。
+    // 拼多多不吃这套（它自己的 H5 就是给内嵌用的），所以只给淘宝/菜鸟改。
+    static var safariUA: String {
+        let v = UIDevice.current.systemVersion
+        let uv = v.replacingOccurrences(of: ".", with: "_")
+        return "Mozilla/5.0 (iPhone; CPU iPhone OS \(uv) like Mac OS X) "
+            + "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/\(v) Mobile/15E148 Safari/604.1"
+    }
 }
 
 // MARK: - 每个标签一个常驻 WebView
@@ -114,6 +125,7 @@ final class WebBox: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessag
             )
         }
         let wv = WKWebView(frame: .zero, configuration: cfg)
+        if spec.id != "pdd" { wv.customUserAgent = Sites.safariUA }
         wv.allowsBackForwardNavigationGestures = true
         wv.scrollView.contentInsetAdjustmentBehavior = .never
         self.webView = wv
@@ -168,9 +180,22 @@ final class WebBox: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessag
                 return d.contains("taobao") || d.contains("cainiao") || d.contains("alipay")
                     || d.contains("pinduoduo") || d.contains("yangkeduo")
             }
-            let names = mine.prefix(14).map { "\($0.domain)/\($0.name)" }.joined(separator: ", ")
-            let extra = "cookies 总数 " + String(cookies.count) + "，本站相关 " + String(mine.count)
-                + (names.isEmpty ? "" : "\n  " + names)
+            // 只列前 14 个 cookie 名会骗人（总数 85 条，真正决定登录态的那几个可能排在第 40 位），
+            // 所以改成：按域名统计 + 明确点名检查会话 cookie 在不在。
+            var byDomain: [String: Int] = [:]
+            for c in mine { byDomain[c.domain.lowercased(), default: 0] += 1 }
+            let doms = byDomain.sorted { $0.value > $1.value }.prefix(10)
+                .map { "\($0.key)=\($0.value)" }.joined(separator: "  ")
+            let keys = ["cookie2", "_tb_token_", "unb", "_l_g_", "sgcookie", "lgc", "tracknick", "_m_h5_tk", "cna"]
+            var have: [String] = []
+            var miss: [String] = []
+            for k in keys {
+                if mine.contains(where: { $0.name == k }) { have.append(k) } else { miss.append(k) }
+            }
+            let extra = "cookies 总数 " + String(cookies.count) + "，相关 " + String(mine.count)
+                + "\n  按域名：" + (doms.isEmpty ? "（无）" : doms)
+                + "\n  会话 cookie 有：" + (have.isEmpty ? "（无）" : have.joined(separator: ","))
+                + "\n  缺少：" + (miss.isEmpty ? "（无）" : miss.joined(separator: ","))
                 + "\nnav(" + String(self.navLog.count) + "): " + self.navLog.suffix(8).joined(separator: " ← ")
             DispatchQueue.main.async {
                 self.diagnoseJS(extra: extra, completion: completion)
