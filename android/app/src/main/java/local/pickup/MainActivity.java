@@ -68,6 +68,7 @@ public class MainActivity extends Activity {
     TextView subtitle, statusLine, banner, hint;
     LinearLayout tabBar;
     LinearLayout fabBox;
+    LinearLayout fabMenuBox;
     TextView fabMain;
     boolean fabOpen = false;
     boolean needsLogin = false;
@@ -344,10 +345,16 @@ public class MainActivity extends Activity {
     }
 
     void buildFab() {
+        // 注意：外层容器必须常显，只有里面的菜单项才收起。
+        // 之前把整个容器 GONE 掉，连主按钮一起藏了，所以「看不到悬浮窗」。
         fabBox = new LinearLayout(this);
         fabBox.setOrientation(LinearLayout.VERTICAL);
         fabBox.setGravity(Gravity.END);
-        fabBox.setVisibility(View.GONE);
+
+        fabMenuBox = new LinearLayout(this);
+        fabMenuBox.setOrientation(LinearLayout.VERTICAL);
+        fabMenuBox.setGravity(Gravity.END);
+        fabMenuBox.setVisibility(View.GONE);
 
         for (String[] item : new String[][]{
                 {"整页登录", "login"}, {"刷新页面", "reload"},
@@ -368,8 +375,10 @@ public class MainActivity extends Activity {
                     ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             lp.gravity = Gravity.END;
             lp.bottomMargin = dp(8);
-            fabBox.addView(btn, lp);
+            fabMenuBox.addView(btn, lp);
         }
+        fabBox.addView(fabMenuBox, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         fabMain = new TextView(this);
         fabMain.setText("⚙");
@@ -378,26 +387,30 @@ public class MainActivity extends Activity {
         fabMain.setGravity(Gravity.CENTER);
         GradientDrawable fbg = new GradientDrawable();
         fbg.setShape(GradientDrawable.OVAL);
-        fbg.setColor(Color.argb(210, 30, 30, 30));
+        fbg.setColor(Color.argb(215, 30, 30, 30));
         fabMain.setBackground(fbg);
         fabMain.setElevation(dp(6));
         fabMain.setOnClickListener(v -> toggleFab(!fabOpen));
-        LinearLayout.LayoutParams flp = new LinearLayout.LayoutParams(dp(50), dp(50));
+        LinearLayout.LayoutParams flp = new LinearLayout.LayoutParams(dp(52), dp(52));
         flp.gravity = Gravity.END;
+        flp.topMargin = dp(4);
         fabBox.addView(fabMain, flp);
 
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.gravity = Gravity.BOTTOM | Gravity.END;
         lp.rightMargin = dp(14);
-        lp.bottomMargin = dp(16);
+        lp.bottomMargin = dp(18);
+        fabBox.setVisibility(View.GONE);   // 只在站点页显示，首页不需要
         content.addView(fabBox, lp);
     }
 
     void toggleFab(boolean open) {
         fabOpen = open;
-        fabBox.setVisibility(open ? View.VISIBLE : View.GONE);
-        fabMain.setText(open ? "✕" : "⚙");
+        if (fabMenuBox != null) {
+            fabMenuBox.setVisibility(open ? View.VISIBLE : View.GONE);
+        }
+        if (fabMain != null) fabMain.setText(open ? "✕" : "⚙");
     }
 
     void buildTabBar() {
@@ -444,10 +457,12 @@ public class MainActivity extends Activity {
         if (idx > 0) {
             ensureWeb(idx);
             webs[idx].setVisibility(View.VISIBLE);
+            if (fabBox != null) fabBox.setVisibility(View.VISIBLE);
             String h = hintText(idx);
             hint.setText(h);
             hint.setVisibility(h.isEmpty() ? View.GONE : View.VISIBLE);
         } else {
+            if (fabBox != null) fabBox.setVisibility(View.GONE);
             hint.setVisibility(View.GONE);
             collectAll();
         }

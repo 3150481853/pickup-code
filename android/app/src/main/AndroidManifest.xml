@@ -6,7 +6,8 @@
 
     <application
         android:allowBackup="true"
-        android:label="取件码"
+        android:icon="@mipmap/ic_launcher"
+        android:label="茉莉取件"
         android:supportsRtl="false"
         android:usesCleartextTraffic="false"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
