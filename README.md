@@ -115,6 +115,13 @@ pinduoduo://com.xunmeng.pinduoduo/mdkd/package?tab=ID_CODE
 
 工程在 `ios/`：SwiftUI + WKWebView 壳，**四个底栏**，页面常驻不重载。
 
+| 版本 | 日期 | 改了什么 |
+| --- | --- | --- |
+| 0.2.0 | 2026-11-14 | 拼多多**登录页**也做同源改路（修「登录完弹回登录页」）；加「诊断」页；淘宝/菜鸟加「整页登录」；产物名带版本号 |
+| 0.1.0 | 2026-11-14 | 首页聚合三个站点、拼多多不跳 App、淘宝入口换 school-tab |
+
+产物命名：`dist/PickupCode-<版本>-unsigned.ipa`，版本号来自 `ios/project.yml` 的 `MARKETING_VERSION`，由流水线自动写进文件名和 artifact 名。
+
 ### 首页 = 所有待取件汇总
 
 打开 App 第一屏就是汇总列表：每行一个取件码（大号等宽字体）+ 来源标签 + 驿站/货位，**点一下就复制**。顶上「刷新全部」把三个站点的页面重新拉一遍。空列表时会显示每个站点的状态（如「未登录 / 登录中」「抓到 7 件」），方便判断该去哪个标签登录。
@@ -131,11 +138,16 @@ pinduoduo://com.xunmeng.pinduoduo/mdkd/package?tab=ID_CODE
 
 淘宝那个入口特意没用 `end-collect-platform/identity-code` —— 那页**只有身份码、没有包裹列表**，聚合拿不到东西；HandyCode 也是把 `m-end-school-tab/home` 当「待取包裹」入口用的。
 
-### 壳里修掉的三件事
+### 壳里修掉的四件事
 
 1. **拼多多登录不再跳 App**：`pinduoduo://` / `intent://` / `taobao://` 这类 scheme 一律 `.cancel`，页面里「打开拼多多App」的按钮也拦掉。所以拼多多要在壳内**用扫码或手机验证码登录**，不会再被拽去 App。
-2. **淘宝/菜鸟验证码能走完**：实现了 `WKUIDelegate.createWebViewWith`，把 `target=_blank` 的弹窗就地加载（返回 `nil` 不新开窗口），并覆盖 `window.open`。不动这个的话，点「获取验证码」就是没反应。
-3. **登录横条不再挤掉表单**：「您需要登录才能继续访问」那条和它的 iframe 会被归零重排。
+2. **拼多多登录不再弹回登录页**（v0.2.0）：登录页自己也发 `POST https://api.pinduoduo.com/api/apoc/binding/mobile/...pre/check`，跨站 424，会话永远建立不起来。现在**登录页/验证页同样做同源改路**（`api.pinduoduo.com/api/` → `m.pinduoduo.net/proxy/api/api/`），不再按页面路径跳过。
+3. **淘宝/菜鸟验证码能走完**：实现了 `WKUIDelegate.createWebViewWith`，把 `target=_blank` 的弹窗就地加载（返回 `nil` 不新开窗口），并覆盖 `window.open`。不动这个的话，点「获取验证码」就是没反应。走不通时点标签页右上角的「**整页登录**」，直接开 `login.taobao.com` 并带 `redirectURL` 回到入口，绕开第三方 Cookie 的 iframe。
+4. **登录横条不再挤掉表单**：「您需要登录才能继续访问」那条和它的 iframe 会被归零重排。
+
+### 出问题怎么查
+
+首页右上角有「**诊断**」按钮：一次把三个站点此刻的 URL、标题、`readyState`、正文长度、正文开头 160 字、有没有「登录中」字样、拼多多卡片数、iframe 列表、抓到的件、**同源改路次数与最近 30 条映射记录**、页面自己的 `console.error/warn` 全拉出来，可全选可一键复制。真机上报错就复制这段，能直接看出是「没登录」「被拦」「改路没生效」还是「DOM 改版」。
 
 ### 已知代价（诚实说）
 
