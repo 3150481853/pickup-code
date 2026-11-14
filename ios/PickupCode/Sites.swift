@@ -39,10 +39,10 @@ func taobaoLogin(to target: URL) -> URL? {
 enum Sites {
     static let pddEntry = URL(string: "https://m.pinduoduo.net/mdkd/package?tab=ID_CODE")!
     static let taobaoEntry = URL(string: "https://pages-fast.m.taobao.com/wow/z/uniapp/1100333/last-mile-fe/m-end-school-tab/home")!
-    // 淘宝「代收身份码」：在驿站扫码取件时用它。
-    // 特意不用菜鸟的 page.cainiao.com 身份码页 —— 那一页在壳里会要求「用菜鸟App扫码添加」，
-    // 网页端没有绑定入口，等于死路；淘宝这一页是同域，登录态直接可用。
-    static let taobaoIdEntry = URL(string: "https://pages-fast.m.taobao.com/wow/z/uniapp/1011717/last-mile-fe/end-collect-platform/identity-code")!
+    // 菜鸟官方 H5「取包裹」页 —— 就是菜鸟 App 里那个「取包裹·共N件」的网页版。
+    // 它内部调 mtop.cainiao.lpc.packageservice.xiniao.querypacklist，需要淘宝登录态；
+    // 未登录时会一直显示「包裹加载中…」的骨架屏。
+    static let cainiaoTakeEntry = URL(string: "https://page.cainiao.com/xiniao-web/xn-h5-gg-tab-closed-takeParcel/#/")!
 
     static let all: [SiteSpec] = [
         // 拼多多：身份码 + 待取包裹（淘宝/天猫里被拼多多代收的件会出现在这里，主要是圆通）
@@ -67,16 +67,16 @@ enum Sites {
                  autoReturnAfterLogin: true,
                  hint: "登录在淘宝自己的域里完成，最不容易被回环卡住"),
 
-        // 身份码：用淘宝「代收身份码」。驿站扫码取件时亮这个。
-        // （菜鸟那一页在壳里会要求「用菜鸟App扫码添加」，网页端没入口，所以不用它）
-        SiteSpec(id: "taobao-id",
-                 tabTitle: "身份码",
-                 entry: taobaoIdEntry,
-                 allowedHosts: ["taobao.com", "tmall.com", "alipay.com", "cainiao.com", "alibaba.com"],
+        // 菜鸟「取包裹」：菜鸟 App 那个「取包裹·共N件」列表的网页版。
+        // 需要淘宝登录（同一套 SessionID），所以登录走淘宝整页登录。
+        SiteSpec(id: "cainiao",
+                 tabTitle: "菜鸟取件",
+                 entry: cainiaoTakeEntry,
+                 allowedHosts: ["cainiao.com", "taobao.com", "tmall.com", "alipay.com", "alibaba.com"],
                  scriptName: "inject-taobao",
-                 loginURL: taobaoLogin(to: taobaoIdEntry),
+                 loginURL: taobaoLogin(to: cainiaoTakeEntry),
                  autoReturnAfterLogin: true,
-                 hint: "驿站扫码取件用这个；登录态和「淘宝取件」共用")
+                 hint: "要点「整页登录」登一次淘宝；登录后这里就是菜鸟「取包裹」原文列表")
     ]
 }
 

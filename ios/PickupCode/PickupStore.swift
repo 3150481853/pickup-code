@@ -33,8 +33,8 @@ final class PickupStore: ObservableObject {
 
     static let siteName: [String: String] = [
         "pdd": "拼多多",
+        "cainiao": "菜鸟",
         "taobao": "淘宝/菜鸟",
-        "taobao-id": "身份码",
         "manual": "手动"
     ]
 
@@ -147,7 +147,7 @@ final class PickupStore: ObservableObject {
             byCode[it.code] = it
             order.append(it.code)
         }
-        for site in ["pdd", "taobao"] {
+        for site in ["cainiao", "pdd", "taobao"] {
             for it in lastPayload[site] ?? [] {
                 if var had = byCode[it.code] {
                     if had.station.isEmpty && !it.station.isEmpty { had = PickupItem(id: had.id, site: had.site, code: had.code, station: it.station, place: had.place, raw: had.raw, seenAt: had.seenAt, manual: had.manual) }

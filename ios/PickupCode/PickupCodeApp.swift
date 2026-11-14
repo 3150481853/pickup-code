@@ -261,7 +261,7 @@ struct HomeView: View {
         VStack(spacing: 10) {
             Text("还没有取件码")
                 .font(.system(size: 15, weight: .medium))
-            Text("先在「拼多多」和「淘宝取件」两个标签里各登录一次：\n拼多多看代收的件，淘宝看菜鸟驿站那批。\n登录一次会记住，抓到的码自动汇总到这里。")
+            Text("三个来源各登录一次就行：\n「菜鸟取件」= 菜鸟的取包裹列表（要淘宝登录），\n「拼多多」= 被多多驿站代收的件。\n也可以在右上角「＋ 添加」里手动输入或截图识别。")
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
