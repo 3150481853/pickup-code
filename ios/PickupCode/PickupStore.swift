@@ -85,19 +85,24 @@ final class PickupStore: ObservableObject {
 
     // MARK: - 手动 / 识别录入
 
-    /// 规范化取件码：全角破折号→半角、去空格、去首尾杂字
+    /// 规范化取件码：全角破折号→半角、去空格、字母统一大写（顺丰的是 B-13016 这种）
     static func normalize(_ s: String) -> String {
         var t = s.trimmingCharacters(in: .whitespacesAndNewlines)
-        for d in ["－", "—", "–", "−", "－"] { t = t.replacingOccurrences(of: d, with: "-") }
+        for d in ["－", "—", "–", "−", "－", "﹣", "‑"] { t = t.replacingOccurrences(of: d, with: "-") }
         t = t.replacingOccurrences(of: " ", with: "")
         t = t.replacingOccurrences(of: "\u{3000}", with: "")
-        return t
+        return t.uppercased()
     }
 
-    /// 是否像取件码（段-段-段，数字）
+    /// 是否像取件码。两种常见形态：
+    /// - 驿站/菜鸟：`122-3-12020`（数字-数字-数字[，也可能只有两段]）
+    /// - 顺丰：`B-13016`（1~3 个字母 + 破折号 + 数字）
     static func looksLikeCode(_ s: String) -> Bool {
         let t = normalize(s)
-        return t.range(of: "^[0-9]{1,4}-[0-9]{1,3}-[0-9]{1,7}$", options: .regularExpression) != nil
+        let two = "^[A-Z]{1,3}-[0-9]{1,7}$"
+        let three = "^[0-9]{1,4}-[0-9]{1,7}(-[0-9]{1,7})?$"
+        return t.range(of: two, options: .regularExpression) != nil
+            || t.range(of: three, options: .regularExpression) != nil
     }
 
     @discardableResult

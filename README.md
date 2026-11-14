@@ -117,6 +117,7 @@ pinduoduo://com.xunmeng.pinduoduo/mdkd/package?tab=ID_CODE
 
 | 版本 | 日期 | 改了什么 |
 | --- | --- | --- |
+| 0.9.2 | 2026-11-14 | 取件码支持**顺丰形态** `B-13016`（1~3 个字母 + 破折号 + 数字）：`normalize` 统一大写、`looksLikeCode` 放开为「字母-数字」与「数字-数字[-数字]」两种、OCR 正则同步、网页抓取正则同步、菜鸟 JSON 解析单独收紧（末段 ≥3 位，避免把 `2026-11` 这种日期当取件码）。手动录入提示改成两种格式都说明 |
 | 0.9.1 | 2026-11-14 | 修 0.9.0 驿站名取错（显示成「校园快递服务中心」甚至整条「广东省广州市…」地址）：改成打分制 —— 含「驿站」最高（+5），自提点/服务站/快递柜/超市/便利店/门卫/收发室（+3），「服务中心」（+1）；带省/市/区/县/镇/街/路/号/栋/楼/室的串一律判为地址、不参与评选。诊断页「菜鸟接口」常驻输出 raw 样本（2000 字）+ 全部条目前 12 条，便于继续对齐真实字段名 |
 | 0.9.0 | 2026-11-14 | 菜鸟「取包裹」改成**原生 mtop 调用**（新增 `Mtop.swift` + `Cainiao.swift`）：网页里 JS 在 `page.cainiao.com` 下读不到 `.taobao.com` 的 `_m_h5_tk` 签名 token，所以 mtop 永远回 `FAIL_SYS_SESSION_EXPIRED`；原生从 `WKHTTPCookieStore` 取全部 cookie、自己算 `md5(token&t&appKey&data)` 签名、自己带 Cookie 头直连 `acs.m.taobao.com`，绕开跨站限制。返回 JSON 不硬编码字段，递归扫「数字-数字-数字」形状取码 + 兄弟字段取驿站/货位 |
 | 0.8.0 | 2026-11-14 | 给淘宝/菜鸟的 WebView 换 **Safari 版 UA**（WKWebView 默认 UA 没有 `Safari/604.1`，阿里系据此判定「App 内嵌 WebView」→ 登录降级、走不完整）；诊断页改成按域名统计 cookie + 点名检查 `cookie2/_tb_token_/unb` 等会话 cookie；新增 mtop 返回码记录（`acs.m.taobao.com` 的 `ret`），用来区分「没登录」和「登录了但接口拒」 |

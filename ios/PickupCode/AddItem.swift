@@ -9,7 +9,7 @@ enum CodeOCR {
         var station: String = ""
     }
 
-    static let codePattern = "[0-9]{1,4}[ \\t]*[-－—–−][ \\t]*[0-9]{1,3}[ \\t]*[-－—–−][ \\t]*[0-9]{1,7}"
+    static let codePattern = "(?:[A-Za-z]{1,3}[ \\t]*[-－—–−﹣‑][ \\t]*[0-9]{1,7}|[0-9]{1,4}[ \\t]*[-－—–−][ \\t]*[0-9]{1,7}(?:[ \\t]*[-－—–−][ \\t]*[0-9]{1,7})?)"
 
     static func scan(_ image: UIImage, completion: @escaping (Result) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
@@ -225,7 +225,7 @@ struct AddItemView: View {
         if store.addManual(code: code, station: station, place: place) {
             presentationMode.wrappedValue.dismiss()
         } else {
-            hint = "这个不像取件码，格式是「数字-数字-数字」，比如 122-3-12020"
+            hint = "这个不像取件码。驿站一般是「数字-数字-数字」（122-3-12020），顺丰是「字母-数字」（B-13016）"
         }
     }
 

@@ -21,7 +21,10 @@ enum Cainiao {
         static func isCode(_ s: String) -> Bool {
             let t = PickupStore.normalize(s)
             guard t.count >= 5, t.count <= 18 else { return false }
-            return PickupStore.looksLikeCode(t)
+            // 比 PickupStore.looksLikeCode 更严：JSON 里满地都是 "2026-11" 这种日期，
+            // 末段必须 3 位以上；顺丰形态要求前面的数字段 ≥3 位。
+            let strict = "^(?:[A-Z]{1,3}-[0-9]{3,7}|[0-9]{1,4}-[0-9]{3,7}|[0-9]{1,3}-[0-9]{1,3}-[0-9]{3,7})$"
+            return t.range(of: strict, options: .regularExpression) != nil
         }
 
         // 地址比驿站名长得多、还带省市区镇：一律不算驿站名。
