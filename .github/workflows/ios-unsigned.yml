@@ -5,19 +5,22 @@ on:
   workflow_dispatch:
   push:
     branches: [main, master]
+    paths-ignore:
+      - '**.md'
+      - 'dist/**'
 
 jobs:
   build:
     name: build (${{ matrix.os }})
-    # macos-14 在这台账号上被解析成 macos-14-arm64-us-default（不支持），
-    # 所以一轮里同时试几个镜像，哪个能起跑哪个就出 ipa，失败的不影响其它。
+    # macos-14 在这个账号上会被解析成 macos-14-arm64-us-default（不支持），
+    # 所以一轮里同时试几个镜像：哪个能起跑哪个就出 ipa，失败的不影响其它。
     runs-on: ${{ matrix.os }}
     continue-on-error: true
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-13, macos-15, macos-latest]
+        os: [macos-15, macos-latest]
 
     steps:
       - uses: actions/checkout@v4
@@ -48,7 +51,7 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            build 2>&1 | tee build.log | tail -80
+            build 2>&1 | tee build.log | tail -60
 
       - name: 打包成 ipa
         if: success()

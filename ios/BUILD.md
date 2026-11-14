@@ -48,6 +48,17 @@ ios/PickupCode/Resources/inject-taobao.js  # 淘宝/菜鸟：去掉「需要登�
 淘宝和菜鸟互相同步会话，所以**只在淘宝标签登录一次**即可；拼多多需要单独登录（可以用小号登录网页端，再在「待取包裹」里验证大号收件手机号，避免顶掉你手机上的拼多多 App 会话）。
 
 
+## 已跑通（2026-11-14）
+
+推上 GitHub 后第一次就编过了，Swift 代码没报错。产物两份（两个镜像各跑一次，取任一份都行）：
+
+- run：`https://github.com/3150481853/pickup-code/actions/runs/43543284981`
+- artifact：`PickupCode-unsigned-ipa-macos-15` / `PickupCode-unsigned-ipa-macos-latest`
+- 本体：56 KB，`Payload/PickupCode.app/PickupCode` 是 `cf fa ed fe 0c 00 00 01`（arm64 Mach-O），`Info.plist` 编译后为 bplist，`DTPlatformName=iphoneos`、SDK `iphoneos18.5`、`MinimumOSVersion=15.0`、`UIDeviceFamily=1`
+- 仓库里 `dist/PickupCode-unsigned.ipa` 是我下载下来的一份，可直接拿去签
+
+**踩到的坑**：`runs-on: macos-14` 在这个账号上被解析成 `macos-14-arm64-us-default`，job 起跑 1 秒就被 cancel，Annotations 里写 `The configuration 'macos-14-arm64-us-default' is not supported`，0 个 step 执行。解决：`matrix.os: [macos-15, macos-latest]` + `fail-fast: false`，macos-13 排队太久就别要了。
+
 ## 你这边三步
 
 1. 在 GitHub 新建一个**空**仓库（private 也行，Actions 免费额度够这个项目跑几千次）。
