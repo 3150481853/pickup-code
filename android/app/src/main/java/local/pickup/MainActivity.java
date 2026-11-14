@@ -81,6 +81,7 @@ public class MainActivity extends Activity {
     LinearLayout fabBox;
     LinearLayout fabMenuBox;
     TextView fabMain;
+    View fabLoginBtn;     // 拼多多标签下要藏起来
     boolean fabOpen = false;
     boolean needsLogin = false;
 
@@ -382,6 +383,7 @@ public class MainActivity extends Activity {
             btn.setBackground(bg);
             btn.setElevation(dp(3));
             final String act = item[1];
+            if ("login".equals(act)) fabLoginBtn = btn;
             btn.setOnClickListener(v -> { doAction(act); toggleFab(false); });
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -421,6 +423,11 @@ public class MainActivity extends Activity {
         fabOpen = open;
         if (fabMenuBox != null) {
             fabMenuBox.setVisibility(open ? View.VISIBLE : View.GONE);
+        }
+        // 拼多多没有「整页登录」（它自己在网页里登录），别让它看着像能用
+        if (fabLoginBtn != null) {
+            boolean ok = selectedIndex > 0 && !"pdd".equals(SITE_IDS[selectedIndex]);
+            fabLoginBtn.setVisibility(ok ? View.VISIBLE : View.GONE);
         }
         if (fabMain != null) fabMain.setText(open ? "✕" : "⚙");
     }
@@ -493,6 +500,13 @@ public class MainActivity extends Activity {
 
     // ---------------- WebView ----------------
 
+    /** 每个站点最近 40 条主框架导航（诊断里用）。 */
+    final List<List<String>> navLogs = new ArrayList<List<String>>();
+
+    {
+        for (int i = 0; i < 4; i++) navLogs.add(new ArrayList<String>());
+    }
+
     void ensureWeb(int idx) {
         if (webs[idx] != null) return;
         final String site = SITE_IDS[idx];
@@ -517,6 +531,13 @@ public class MainActivity extends Activity {
             }
             @Override public boolean shouldOverrideUrlLoading(WebView v, android.webkit.WebResourceRequest r) {
                 return blockScheme(r.getUrl().toString());
+            }
+            @Override public void onPageStarted(WebView v, String url, android.graphics.Bitmap fav) {
+                List<String> log = navLogs.get(idx);
+                if (log != null && url != null) {
+                    log.add(url);
+                    while (log.size() > 40) log.remove(0);
+                }
             }
             @Override public void onPageFinished(WebView v, String url) {
                 inject(v, site);
@@ -588,6 +609,13 @@ public class MainActivity extends Activity {
         String site = SITE_IDS[idx];
         switch (act) {
             case "login":
+                // 「整页登录」只对淘宝/菜鸟有意义（那是淘宝的登录页）。
+                // 拼多多在自己的网页里登录，这里绝不能拼淘宝登录地址 ——
+                // 之前没挡，结果在「拼多多」标签点了就变成淘宝登录界面。
+                if ("pdd".equals(site)) {
+                    Toast.makeText(this, "拼多多用自己的网页登录（手机号/扫码），不用整页登录", Toast.LENGTH_LONG).show();
+                    break;
+                }
                 wv.loadUrl(TAOBAO_LOGIN + URLEncoder.encode(ENTRIES[idx]));
                 break;
             case "reload":
@@ -885,24 +913,133 @@ public class MainActivity extends Activity {
     }
 
     void showDiag() {
-        StringBuilder sb = new StringBuilder();
-        sb.append("版本：").append(versionName()).append("\n");
-        sb.append("菜鸟接口：").append(store.siteState.containsKey("cainiao")
-                ? store.siteState.get("cainiao") : "还没跑").append("\n");
+        StringBuilder head = new StringBuilder();
+        head.append("版本：").append(versionName()).append("\n");
+        head.append("设备：").append(Build.MANUFACTURER).append(' ').append(Build.MODEL)
+            .append(" / Android ").append(Build.VERSION.RELEASE).append("\n");
+        head.append("壳 UA：").append(safariUA()).append("\n");
+
+        String[][] probes = {{"www.taobao.com", "https://www.taobao.com"},
+                {"m.taobao.com", "https://m.taobao.com"},
+                {"page.cainiao.com", "https://page.cainiao.com"},
+                {"m.pinduoduo.net", "https://m.pinduoduo.net"},
+                {"acs.m.taobao.com", "https://acs.m.taobao.com"}};
+        CookieManager cm = CookieManager.getInstance();
+        for (String[] p : probes) {
+            String c = cm.getCookie(p[1]);
+            int n = (c == null || c.trim().isEmpty()) ? 0 : c.split(";").length;
+            head.append("cookie ").append(p[0]).append("：").append(n).append(" 条\n");
+        }
+        String tc = cm.getCookie("https://www.taobao.com");
+        if (tc == null) tc = "";
+        StringBuilder have = new StringBuilder();
+        StringBuilder miss = new StringBuilder();
+        for (String n : new String[]{"cookie2", "_tb_token_", "unb", "_l_g_", "sgcookie",
+                "lgc", "tracknick", "_m_h5_tk", "cna"}) {
+            if (tc.contains(n + "=")) have.append(n).append(' ');
+            else miss.append(n).append(' ');
+        }
+        head.append("淘宝会话 cookie 有：").append(have.toString().trim()).append("\n");
+        head.append("淘宝会话 cookie 缺：").append(
+                miss.toString().trim().isEmpty() ? "（无）" : miss.toString().trim()).append("\n");
         for (String k : store.siteState.keySet()) {
-            sb.append(store.siteLabel(k)).append("：").append(store.siteState.get(k)).append("\n");
+            head.append(store.siteLabel(k)).append("：").append(store.siteState.get(k)).append("\n");
         }
-        String cookies = Mtop.cookieHeader();
-        sb.append("淘宝 cookie 条数：").append(cookies.isEmpty() ? 0 : cookies.split(";").length).append("\n");
-        sb.append("有 _m_h5_tk：").append(cookies.contains("_m_h5_tk")).append("\n");
-        sb.append("有 unb：").append(cookies.contains("unb=")).append("\n");
-        sb.append("共 ").append(store.items.size()).append(" 条：\n");
-        for (PickupItem it : store.items) {
-            sb.append(it.code).append("  ｜ ").append(store.siteLabel(it.site))
-              .append(" ｜ ").append(it.station).append(" ｜ ").append(it.place).append("\n");
+
+        final String[] siteDiag = new String[4];
+        final java.util.concurrent.atomic.AtomicInteger done =
+                new java.util.concurrent.atomic.AtomicInteger(0);
+        final int total = 3;
+        for (int i = 1; i <= 3; i++) {
+            final int idx = i;
+            WebView wv = webs[idx];
+            if (wv == null) {
+                siteDiag[idx] = "{\"err\":\"这个标签还没打开过（先点进去一次）\"}";
+                if (done.incrementAndGet() == total) diagMtopAndShow(head, siteDiag);
+                continue;
+            }
+            String js = "(function(){try{var d=window.__pickupDiagnostics?window.__pickupDiagnostics()"
+                    + ":{err:'agent 没注入'};return JSON.stringify(d);}catch(e){return JSON.stringify({err:String(e)});}})()";
+            wv.evaluateJavascript(js, value -> {
+                siteDiag[idx] = jsonUnquote(value);
+                if (done.incrementAndGet() == total) diagMtopAndShow(head, siteDiag);
+            });
         }
+    }
+
+    void diagMtopAndShow(final StringBuilder head, final String[] siteDiag) {
+        Mtop.call("mtop.cainiao.lpc.packageservice.xiniao.querypacklist",
+                "{\"staId\":\"\",\"day\":30,\"needAuthControl\":true}", reply -> {
+                    final StringBuilder sb = new StringBuilder(head);
+                    for (int i = 1; i <= 3; i++) {
+                        sb.append("\n===== ").append(TABS[i]).append(" =====\n");
+                        sb.append(pretty(siteDiag[i])).append("\n");
+                        List<String> nav = navLogs.get(i);
+                        if (nav == null || nav.isEmpty()) {
+                            sb.append("nav：还没有导航记录\n");
+                        } else {
+                            sb.append("nav(").append(nav.size()).append(")：\n");
+                            for (int k = Math.max(0, nav.size() - 8); k < nav.size(); k++) {
+                                sb.append("  ").append(k + 1).append(". ").append(nav.get(k)).append("\n");
+                            }
+                        }
+                    }
+                    sb.append("\n===== 菜鸟原生接口 =====\n");
+                    sb.append("ret：").append(reply.ret).append("\n");
+                    sb.append("原生抓到：").append(reply.items.size()).append(" 件\n");
+                    int n = 0;
+                    for (PickupItem it : reply.items) {
+                        if (n++ >= 8) break;
+                        sb.append(it.code).append("  ｜ ").append(it.station)
+                          .append(" ｜ ").append(it.place).append("\n");
+                    }
+                    if (reply.items.isEmpty() && reply.raw != null && !reply.raw.isEmpty()) {
+                        sb.append("raw：").append(reply.raw.length() > 1200
+                                ? reply.raw.substring(0, 1200) + "…" : reply.raw).append("\n");
+                    }
+                    sb.append("\n首页共 ").append(store.items.size()).append(" 条\n");
+                    for (PickupItem it : store.items) {
+                        sb.append(it.code).append("  ｜ ").append(store.siteLabel(it.site))
+                          .append(" ｜ ").append(it.station).append(" ｜ ").append(it.place).append("\n");
+                    }
+                    runOnUiThread(() -> showDiagText(sb.toString()));
+                });
+    }
+
+    String pretty(String json) {
+        if (json == null || json.trim().isEmpty()) return "（空）";
+        try {
+            JSONObject o = new JSONObject(json);
+            StringBuilder sb = new StringBuilder();
+            java.util.Iterator<String> it = o.keys();
+            while (it.hasNext()) {
+                String k = it.next();
+                String v = String.valueOf(o.opt(k));
+                if (v.length() > 900) v = v.substring(0, 900) + "…";
+                sb.append(k).append("：").append(v).append("\n");
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return json.length() > 1200 ? json.substring(0, 1200) : json;
+        }
+    }
+
+    String jsonUnquote(String v) {
+        if (v == null) return "";
+        v = v.trim();
+        if (v.length() > 1 && v.startsWith("\"") && v.endsWith("\"")) {
+            try {
+                return new JSONArray("[" + v + "]").getString(0);
+            } catch (Exception e) {
+                return v;
+            }
+        }
+        return v;
+    }
+
+    void showDiagText(String text) {
         TextView tv = new TextView(this);
-        tv.setText(sb.toString());
+        tv.setText(text);
         tv.setTextSize(11);
         tv.setTypeface(Typeface.MONOSPACE);
         tv.setTextIsSelectable(true);
@@ -913,8 +1050,8 @@ public class MainActivity extends Activity {
                 .setTitle("诊断")
                 .setView(sv)
                 .setPositiveButton("复制", (d, w) -> {
-                    copy(sb.toString());
-                    Toast.makeText(this, "已复制", Toast.LENGTH_SHORT).show();
+                    copy(text);
+                    Toast.makeText(this, "已复制 " + text.length() + " 字", Toast.LENGTH_SHORT).show();
                 })
                 .setNegativeButton("关闭", null)
                 .show();

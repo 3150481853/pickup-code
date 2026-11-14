@@ -195,8 +195,10 @@ struct ContentView: View {
     private var siteMenu: some View {
         VStack(alignment: .trailing, spacing: 10) {
             if showMenu {
-                siteButton("整页登录", "person.badge.key.fill") {
-                    model.boxes[selected - 1].login()
+                if selected > 0, model.boxes[selected - 1].canLogin {
+                    siteButton("整页登录", "person.badge.key.fill") {
+                        model.boxes[selected - 1].login()
+                    }
                 }
                 siteButton("刷新页面", "arrow.clockwise") {
                     model.boxes[selected - 1].reload()

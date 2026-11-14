@@ -284,7 +284,10 @@
   // ---------- 五、启动 ----------
   // 拼多多「请确认继续用当前账号登录」那一屏的「快速进入」是要拉拼多多 App 的，
   // 壳里把 pinduoduo:// 拦掉了，所以点了等于没反应。把它藏掉，留一条能走通的路。
+  // 注意：只在拼多多域名下动手 —— 淘系的「快速进入」是网页内 SSO，必须能点。
   function fixLoginConfirm() {
+    var h = (location.hostname || '').toLowerCase();
+    if (h.indexOf('pinduoduo') < 0 && h.indexOf('yangkeduo') < 0) return;
     var nodes = document.querySelectorAll('div,button,span,a');
     var hit = null;
     for (var i = 0; i < nodes.length; i++) {

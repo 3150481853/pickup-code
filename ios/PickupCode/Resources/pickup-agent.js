@@ -310,7 +310,32 @@
         }
     }
 
+    // 4) 淘系 SSO 确认页（头像 t**5 / 「请确认继续用当前账号登录」 / 「快速进入」）：
+    //    这屏在网页里点「快速进入」是拿当前淘宝账号完成 SSO 再回跳，不会跳 App；
+    //    但那个按钮常常不是真 <button>/<a>，点了没反应，所以这里替用户点一次。
+    var ssoTried = false;
+    function autoConfirmSso() {
+        if (ssoTried) { return; }
+        var host = location.hostname || '';
+        if (!/(taobao|cainiao|alipay)\.com$/.test(host)) { return; }
+        var body = document.body;
+        if (!body) { return; }
+        if (norm(body.textContent).indexOf('请确认继续用当前账号登录') < 0) { return; }
+        var all = body.querySelectorAll('button, a, div, span');
+        for (var i = 0; i < all.length; i++) {
+            var el = all[i];
+            if (el.childElementCount === 0 && norm(el.textContent) === '快速进入') {
+                ssoTried = true;
+                try { el.click(); } catch (e) {}
+                return;
+            }
+        }
+    }
+
     if (document.readyState === 'complete') { schedule(800); }
     else { window.addEventListener('load', function () { schedule(1000); }); }
-    setInterval(function () { try { fixTaobaoLoginChrome(); } catch (e) {} }, 1500);
+    setInterval(function () {
+        try { fixTaobaoLoginChrome(); } catch (e) {}
+        try { autoConfirmSso(); } catch (e) {}
+    }, 1500);
 })();
