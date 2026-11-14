@@ -106,6 +106,7 @@ struct ContentView: View {
     @StateObject private var model = AppModel()
     @State private var selected = 0     // 0 = 首页，1..3 = 三个站点
     @State private var showDiag = false
+    @State private var showMenu = false
 
     private var titles: [String] { ["首页"] + Sites.all.map { $0.tabTitle } }
 
@@ -129,16 +130,17 @@ struct ContentView: View {
                              })
                         .background(Color(UIColor.systemGroupedBackground))
                 } else {
-                    HStack(spacing: 6) {
-                        if model.boxes[selected - 1].canLogin {
-                            chrome("整页登录") { model.boxes[selected - 1].login() }
+                    // 站点页的操作收进右下角悬浮按钮：原来右上角三个小胶囊太挤，
+                    // 网页自己的顶部按钮也常被它们压住。
+                    VStack {
+                        Spacer()
+                        HStack {
+                            Spacer()
+                            siteMenu
                         }
-                        chrome("刷新") { model.boxes[selected - 1].reload() }
-                        chrome("入口") { model.boxes[selected - 1].backToEntry() }
                     }
-                    .padding(.trailing, 10)
-                    .padding(.top, 6)
-                    .opacity(0.85)
+                    .padding(.trailing, 14)
+                    .padding(.bottom, 16)
                 }
             }
 
@@ -167,41 +169,93 @@ struct ContentView: View {
         model.boxes[idx].login()
     }
 
-    private func chrome(_ title: String, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 11, weight: .medium))
-                .padding(.horizontal, 9)
-                .padding(.vertical, 5)
-                .background(Color.black.opacity(0.06))
-                .clipShape(Capsule())
+    // 悬浮按钮：一下展开，再一下收起，所有站点操作都从这里走
+    private var siteMenu: some View {
+        VStack(alignment: .trailing, spacing: 10) {
+            if showMenu {
+                siteButton("整页登录", "person.badge.key.fill") {
+                    model.boxes[selected - 1].login()
+                }
+                siteButton("刷新页面", "arrow.clockwise") {
+                    model.boxes[selected - 1].reload()
+                }
+                siteButton("回到入口", "arrow.uturn.backward") {
+                    model.boxes[selected - 1].backToEntry()
+                }
+                siteButton("抓一次", "hand.tap.fill") {
+                    model.boxes[selected - 1].collect()
+                }
+            }
+            Button {
+                withAnimation(.easeOut(duration: 0.16)) { showMenu.toggle() }
+            } label: {
+                ZStack {
+                    Circle()
+                        .fill(Color.black.opacity(0.62))
+                        .frame(width: 50, height: 50)
+                        .shadow(color: .black.opacity(0.22), radius: 8, y: 3)
+                    Image(systemName: showMenu ? "xmark" : "slider.horizontal.3")
+                        .font(.system(size: 19, weight: .semibold))
+                        .foregroundColor(.white)
+                }
+            }
+            .buttonStyle(PlainButtonStyle())
         }
-        .foregroundColor(.black.opacity(0.55))
+    }
+
+    private func siteButton(_ title: String, _ icon: String,
+                            _ action: @escaping () -> Void) -> some View {
+        Button {
+            action()
+            withAnimation(.easeOut(duration: 0.16)) { showMenu = false }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: icon).font(.system(size: 12, weight: .semibold))
+                Text(title).font(.system(size: 13, weight: .medium))
+            }
+            .foregroundColor(.primary)
+            .padding(.horizontal, 13)
+            .padding(.vertical, 9)
+            .background(.regularMaterial)
+            .clipShape(Capsule())
+            .shadow(color: .black.opacity(0.12), radius: 5, y: 2)
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+
+    private func tabIcon(_ idx: Int) -> String {
+        if idx == 0 { return "house.fill" }
+        switch Sites.all[idx - 1].id {
+        case "cainiao": return "shippingbox.fill"
+        case "pdd":     return "cart.fill"
+        default:        return "tag.fill"
+        }
     }
 
     private var tabBar: some View {
         HStack(spacing: 0) {
             ForEach(titles.indices, id: \.self) { idx in
                 let title = titles[idx]
+                let active = idx == selected
                 Button {
                     selected = idx
+                    showMenu = false
                     if idx > 0 { model.boxes[idx - 1].openIfNeeded() }
                     else { model.collectAll() }
                 } label: {
-                    VStack(spacing: 3) {
+                    VStack(spacing: 4) {
+                        Image(systemName: tabIcon(idx))
+                            .font(.system(size: 19, weight: active ? .semibold : .regular))
                         Text(title)
-                            .font(.system(size: 11, weight: idx == selected ? .semibold : .regular))
+                            .font(.system(size: 12, weight: active ? .semibold : .regular))
                             .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                        Circle()
-                            .fill(idx == selected ? Color(red: 1.0, green: 0.17, blue: 0.33) : Color.clear)
-                            .frame(width: 4, height: 4)
+                            .minimumScaleFactor(0.75)
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.top, 9)
-                    .padding(.bottom, 6)
+                    .padding(.bottom, 7)
                 }
-                .foregroundColor(idx == selected ? .primary : .secondary)
+                .foregroundColor(active ? Color(red: 0.93, green: 0.14, blue: 0.30) : .secondary)
             }
         }
         .background(Color(UIColor.systemBackground))

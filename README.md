@@ -117,6 +117,7 @@ pinduoduo://com.xunmeng.pinduoduo/mdkd/package?tab=ID_CODE
 
 | 版本 | 日期 | 改了什么 |
 | --- | --- | --- |
+| 0.10.0 | 2026-11-14 | 界面改版：站点页右上角那排小胶囊换成**右下角悬浮按钮**（点一下展开：整页登录 / 刷新页面 / 回到入口 / 抓一次，再点收起）；底部标签栏加图标、字号和间距放大；**新增安卓版**（`android/`，同一套逻辑：网页只做登录 + 兜底抓取，菜鸟列表走原生 mtop），CI 出**自签 release APK**，装上即用、可覆盖升级 |
 | 0.9.3 | 2026-11-14 | 首页加**登录失效横幅**：菜鸟接口回 `SESSION_EXPIRED`/`TOKEN_EMPTY`/`NEED_LOGIN` 时，首页顶部出现「淘宝登录已失效 → 点这里重新登录」，点一下自动切到菜鸟标签并打开 `login.taobao.com` 迷你登录页；登录成功后横幅自动消失。原因：重装 App（全能签重签也一样）会清空 WKWebView 的 cookie 存储，淘宝登录态丢光，首页只会显示「没抓到」，不给入口就回不来 |
 | 0.9.2 | 2026-11-14 | 取件码支持**顺丰形态** `B-13016`（1~3 个字母 + 破折号 + 数字）：`normalize` 统一大写、`looksLikeCode` 放开为「字母-数字」与「数字-数字[-数字]」两种、OCR 正则同步、网页抓取正则同步、菜鸟 JSON 解析单独收紧（末段 ≥3 位，避免把 `2026-11` 这种日期当取件码）。手动录入提示改成两种格式都说明 |
 | 0.9.1 | 2026-11-14 | 修 0.9.0 驿站名取错（显示成「校园快递服务中心」甚至整条「广东省广州市…」地址）：改成打分制 —— 含「驿站」最高（+5），自提点/服务站/快递柜/超市/便利店/门卫/收发室（+3），「服务中心」（+1）；带省/市/区/县/镇/街/路/号/栋/楼/室的串一律判为地址、不参与评选。诊断页「菜鸟接口」常驻输出 raw 样本（2000 字）+ 全部条目前 12 条，便于继续对齐真实字段名 |
@@ -173,6 +174,27 @@ pinduoduo://com.xunmeng.pinduoduo/mdkd/package?tab=ID_CODE
 > 本机（Windows）编不了 iOS：iOS 二进制要 Apple 的 iOS SDK 链接，本机 `clang`/`swift`/iOS SDK 全没有，WSL 也没装发行版。
 
 详细步骤和踩过的坑在 [ios/BUILD.md](ios/BUILD.md)。
+
+---
+
+## 六点五、安卓版（`android/`）
+
+和 iOS 版同一套逻辑，纯原生 Java（不用 AndroidX/Compose，依赖只有 AGP，CI 跑得快）：
+
+- 网页只负责**登录 + 兜底抓取**；菜鸟「取包裹」列表由 `Mtop.java` 走原生 mtop 拿
+  （`mtop.cainiao.lpc.packageservice.xiniao.querypacklist`，appKey `12574478`，
+  签名 `md5(_m_h5_tk 的 token + "&" + t + "&" + appKey + "&" + data)`）。
+  为什么不在网页里调：签名 token 存在 `.taobao.com` 域的 `_m_h5_tk` 里，
+  菜鸟页 JS 跑在 `page.cainiao.com`，读不到别的域的 cookie，签名必错。
+- 安卓侧 cookie 用 `CookieManager.getCookie("https://www.taobao.com")` 取
+  （按 URL 域名匹配，`.taobao.com` 上的票才会一起带出来）。
+- UI：底栏四个标签（首页 / 菜鸟取件 / 拼多多 / 淘宝取件），站点页右下角**悬浮按钮**展开
+  登录 / 刷新 / 回入口 / 抓一次；首页可手动添加取件码、可看诊断。
+- 打包：`.github/workflows/android.yml`（`ubuntu-latest` 自带 Android SDK，Gradle 8.7 + AGP 8.5.2），
+  产物 `PickupCode-<ver>-android.apk`，用仓库里的 `android/keystore.jks` 自签，
+  **可以直接装、也能覆盖升级**（debug 密钥每次构建都不同，装第二次就得卸载，所以没用 debug）。
+
+> 本机没有 Android SDK / Gradle，安卓包同样只能在 CI 里出。
 
 ---
 

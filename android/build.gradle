@@ -1,0 +1,14 @@
+// 纯 Android 原生（不用 AndroidX/Compose），依赖只有 AGP 本身，CI 上跑得快。
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.5.2'
+    }
+}
+
+tasks.register('clean', Delete) {
+    delete rootProject.buildDir
+}
