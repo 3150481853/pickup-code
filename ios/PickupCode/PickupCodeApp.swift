@@ -157,7 +157,9 @@ struct HomeView: View {
             }
             .padding(.horizontal, 16)
             .padding(.top, 14)
-            .padding(.bottom, 10)
+            .padding(.bottom, store.siteState.isEmpty ? 10 : 4)
+
+            if !store.siteState.isEmpty { statusLine }
 
             if store.items.isEmpty {
                 Spacer()
@@ -177,11 +179,24 @@ struct HomeView: View {
         }
     }
 
+    private var statusLine: some View {
+        let parts = store.siteState
+            .sorted { $0.key < $1.key }
+            .map { "\(PickupStore.siteName[$0.key] ?? $0.key)：\($0.value)" }
+        return Text(parts.joined(separator: "    "))
+            .font(.system(size: 11))
+            .foregroundColor(.secondary.opacity(0.85))
+            .lineLimit(2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+    }
+
     private var emptyView: some View {
         VStack(spacing: 10) {
             Text("还没有取件码")
                 .font(.system(size: 15, weight: .medium))
-            Text("先在下面两个标签里登录一次：\n「拼多多」看代取的圆通件，「淘宝取件」看菜鸟那批。\n抓取成功后这里会自动汇总。")
+            Text("先在下面三个标签里各登录一次：\n「拼多多」看代取的圆通件，「淘宝取件」看菜鸟那批。\n登录一次会记住，抓到的码自动汇总到这里。")
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -196,15 +211,6 @@ struct HomeView: View {
             }
             .foregroundColor(.primary)
             .padding(.top, 6)
-
-            if !store.siteState.isEmpty {
-                Text(store.siteState.map { "\(PickupStore.siteName[$0.key] ?? $0.key)：\($0.value)" }
-                        .sorted()
-                        .joined(separator: "   "))
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary.opacity(0.8))
-                    .padding(.top, 8)
-            }
         }
         .padding(.horizontal, 34)
     }
