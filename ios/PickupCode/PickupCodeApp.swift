@@ -162,6 +162,8 @@ struct HomeView: View {
     var onRefresh: () -> Void
     var onDiagnose: () -> Void
 
+    @State private var showAdd = false
+
     private var subtitle: String {
         if store.items.isEmpty { return "还没有数据" }
         var s = "共 \(store.items.count) 件"
@@ -187,6 +189,15 @@ struct HomeView: View {
                 Text("v" + (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"))
                     .font(.system(size: 10))
                     .foregroundColor(.secondary.opacity(0.7))
+                Button(action: { showAdd = true }) {
+                    Text("＋ 添加")
+                        .font(.system(size: 12, weight: .semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color(red: 1.0, green: 0.17, blue: 0.33).opacity(0.12))
+                        .clipShape(Capsule())
+                }
+                .foregroundColor(Color(red: 0.85, green: 0.10, blue: 0.25))
                 Button(action: onDiagnose) {
                     Text("诊断")
                         .font(.system(size: 12, weight: .medium))
@@ -227,6 +238,9 @@ struct HomeView: View {
                     .padding(.bottom, 28)
                 }
             }
+        }
+        .sheet(isPresented: $showAdd) {
+            AddItemView(store: store)
         }
     }
 
@@ -286,9 +300,18 @@ struct HomeView: View {
                 }
             }
             Spacer(minLength: 0)
-            Image(systemName: "doc.on.doc")
-                .font(.system(size: 13))
-                .foregroundColor(.secondary.opacity(0.7))
+            if item.manual {
+                Button(action: { store.removeManual(code: item.code) }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 17))
+                        .foregroundColor(.secondary.opacity(0.55))
+                }
+                .buttonStyle(PlainButtonStyle())
+            } else {
+                Image(systemName: "doc.on.doc")
+                    .font(.system(size: 13))
+                    .foregroundColor(.secondary.opacity(0.7))
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)

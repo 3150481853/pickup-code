@@ -22,6 +22,10 @@
     <string>$(CURRENT_PROJECT_VERSION)</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
+    <key>NSCameraUsageDescription</key>
+    <string>拍取件列表的屏幕/短信，识别里面的取件码。照片只在本机识别，不会上传。</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>从相册选一张取件列表的截图，识别里面的取件码。照片只在本机识别，不会上传。</string>
     <key>MinimumOSVersion</key>
     <string>15.0</string>
     <key>UILaunchScreen</key>
