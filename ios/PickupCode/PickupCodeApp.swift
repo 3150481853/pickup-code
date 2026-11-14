@@ -9,6 +9,7 @@ final class AppModel: ObservableObject {
     let boxes: [WebBox]
     @Published var diag: [(String, String)] = []
     @Published private(set) var mtopNote: String = ""
+    @Published private(set) var needsLogin = false
     private var timer: Timer?
     private var cainiaoTimer: Timer?
 
@@ -37,10 +38,21 @@ final class AppModel: ObservableObject {
             var note = "菜鸟接口：" + reply.ret
             if reply.ok {
                 note += " · " + String(items.count) + " 件"
+                self.needsLogin = false
                 self.store.ingestNative(site: "cainiao", items: items,
                                         state: "抓到 " + String(items.count) + " 件")
-            } else if !reply.raw.isEmpty {
-                note += "\n  " + String(reply.raw.prefix(400))
+            } else {
+                // 重装 / 清缓存后淘宝登录态会丢，接口就回 SESSION_EXPIRED：
+                // 首页要能一眼看出来并一键去重新登录，否则只会显示「没抓到」。
+                if reply.ret.contains("SESSION_EXPIRED") || reply.ret.contains("TOKEN_EMPTY")
+                    || reply.ret.contains("NEED_LOGIN") {
+                    self.needsLogin = true
+                }
+                self.store.ingestNative(site: "cainiao", items: [],
+                                        state: reply.ret.components(separatedBy: "::").first ?? "失败")
+                if !reply.raw.isEmpty {
+                    note += "\n  " + String(reply.raw.prefix(400))
+                }
             }
             self.mtopNote = note
         }
@@ -108,6 +120,8 @@ struct ContentView: View {
 
                 if selected == 0 {
                     HomeView(store: model.store,
+                             needsLogin: model.needsLogin,
+                             onRelogin: relogin,
                              onRefresh: model.refreshAll,
                              onDiagnose: {
                                  model.diagnoseAll()
@@ -143,6 +157,14 @@ struct ContentView: View {
         .sheet(isPresented: $showDiag) {
             DiagView(model: model, isPresented: $showDiag)
         }
+    }
+
+    // 菜鸟接口回 SESSION_EXPIRED 时，从首页一键回淘宝登录页
+    private func relogin() {
+        guard let idx = model.boxes.firstIndex(where: { $0.spec.id == "cainiao" }) else { return }
+        selected = idx + 1
+        model.boxes[idx].openIfNeeded()
+        model.boxes[idx].login()
     }
 
     private func chrome(_ title: String, _ action: @escaping () -> Void) -> some View {
@@ -196,6 +218,8 @@ struct ContentView: View {
 
 struct HomeView: View {
     @ObservedObject var store: PickupStore
+    var needsLogin: Bool
+    var onRelogin: () -> Void
     var onRefresh: () -> Void
     var onDiagnose: () -> Void
 
@@ -260,6 +284,8 @@ struct HomeView: View {
 
             if !store.siteState.isEmpty { statusLine }
 
+            if needsLogin { loginBanner }
+
             if store.items.isEmpty {
                 Spacer()
                 emptyView
@@ -294,11 +320,32 @@ struct HomeView: View {
             .padding(.bottom, 8)
     }
 
+    // 菜鸟接口说「会话失效」时给一条能直接点的提示：重装 App 会清空 WKWebView 的 cookie，
+    // 淘宝登录态没了，首页只会显示「没抓到」，不点这一步永远回不来。
+    private var loginBanner: some View {
+        Button(action: onRelogin) {
+            HStack(spacing: 8) {
+                Text("淘宝登录已失效，菜鸟列表拿不到 →")
+                    .font(.system(size: 11))
+                Text("点这里重新登录")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .foregroundColor(Color(red: 0.85, green: 0.10, blue: 0.25))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color(red: 1.0, green: 0.17, blue: 0.33).opacity(0.10))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .padding(.horizontal, 12)
+            .padding(.bottom, 8)
+        }
+    }
+
     private var emptyView: some View {
         VStack(spacing: 10) {
             Text("还没有取件码")
                 .font(.system(size: 15, weight: .medium))
-            Text("三个来源各登录一次就行：\n「菜鸟取件」= 菜鸟的取包裹列表（要淘宝登录），\n「拼多多」= 被多多驿站代收的件。\n也可以在右上角「＋ 添加」里手动输入或截图识别。")
+            Text("两个来源各登录一次就行：\n「菜鸟取件」= 菜鸟的取包裹列表（要淘宝登录），\n「拼多多」= 被多多驿站代收的件。\n也可以在右上角「＋ 添加」里手动输入或截图识别。")
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
