@@ -18,8 +18,24 @@ enum Cainiao {
     }
 
     enum Parser {
-        static func isCode(_ s: String) -> Bool {
-            let t = PickupStore.normalize(s)
+        /// 诊断用：从 raw JSON 里挑出像图片的地址 —— 主图取不到时，得先知道返回里到底有没有图
+        static func imageCandidates(_ raw: String, limit: Int = 6) -> [String] {
+            let flat = raw.replacingOccurrences(of: "\\/", with: "/")
+            guard let re = try? NSRegularExpression(pattern: "https?://[^\"'\\s\\\\]{18,300}") else { return [] }
+            let ns = flat as NSString
+            var out: [String] = []
+            for m in re.matches(in: flat, options: [], range: NSRange(location: 0, length: ns.length)) {
+                let u = ns.substring(with: m.range).lowercased()
+                let looks = u.contains(".jpg") || u.contains(".jpeg") || u.contains(".png")
+                    || u.contains(".webp") || u.contains("alicdn") || u.contains("pddpic")
+                    || u.contains("hdslb")
+                if looks, !out.contains(where: { $0.hasPrefix(String(u.prefix(40))) }) { out.append(u) }
+                if out.count >= limit { break }
+            }
+            return out
+        }
+
+        static func isCode(_ s: String) -> Bool {            let t = PickupStore.normalize(s)
             guard t.count >= 5, t.count <= 18 else { return false }
             // 比 PickupStore.looksLikeCode 更严：JSON 里满地都是 "2026-11" 这种日期，
             // 末段必须 3 位以上；顺丰形态要求前面的数字段 ≥3 位。
@@ -81,38 +97,63 @@ enum Cainiao {
         static func imgOf(_ pairs: [(String, String)]) -> String {
             var best = ""
             var bestScore = 0
+            var fallback = ""
+            var fbScore = 0
             for (key, value) in pairs {
                 let t = value.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard t.hasPrefix("http"), t.count > 18, t.count < 600 else { continue }
                 let low = t.lowercased()
                 let lk = key.lowercased()
-                // 明显不是商品图的东西：图标、头像、广告位、埋点、占位图
-                let bad = ["icon", "logo", "avatar", "sprite", "banner", "advert", "ad_",
-                           "track", "1x1", "loading", "placeholder", "default_img",
-                           "defaultimg", ".gif"]
-                if bad.contains(where: { low.contains($0) }) { continue }
+                // 埋点像素、占位图、动图一律不要
+                if low.contains("1x1") || low.contains("track") || low.contains("placeholder")
+                    || low.contains("loading") || low.hasSuffix(".gif") { continue }
+                let isProductish = lk.contains("img") || lk.contains("pic") || lk.contains("photo")
+                    || lk.contains("image") || lk.contains("url")
+                // 第一档：商品图
                 var score = 0
-                // 字段名直接说「这是图」
-                if lk.contains("img") || lk.contains("pic") || lk.contains("photo")
-                    || lk.contains("image") { score += 4 }
-                // 淘宝/菜鸟商品图的常见图床路径
+                if isProductish { score += 4 }
                 if low.contains("/bao/uploaded/") || low.contains("imgextra") { score += 4 }
                 if low.contains("alicdn.com/img") || low.contains("img.alicdn") { score += 3 }
+                else if low.contains("alicdn.com") || low.contains("taobaocdn") { score += 2 }
                 if low.hasSuffix(".jpg") || low.hasSuffix(".jpeg")
                     || low.hasSuffix(".png") || low.hasSuffix(".webp") { score += 2 }
-                // 大图优先（_800x800 / _400x400 这种）
                 if low.range(of: "_[4-9][0-9]{2}x[4-9][0-9]{2}",
                              options: .regularExpression) != nil { score += 1 }
                 if score > bestScore { bestScore = score; best = t }
+
+                // 第二档（兜底）：没有商品图时用快递公司 logo —— 总比空着强，
+                // 之前一律排掉 logo，结果整列都是图标。
+                var fb = 0
+                if lk.contains("logo") || lk.contains("icon") || lk.contains("brand")
+                    || lk.contains("company") || lk.contains("express") { fb += 3 }
+                if low.hasSuffix(".jpg") || low.hasSuffix(".jpeg")
+                    || low.hasSuffix(".png") || low.hasSuffix(".webp") { fb += 2 }
+                else if low.contains("alicdn") || low.contains("pddpic") || low.contains("hdslb") { fb += 1 }
+                if fb > fbScore { fbScore = fb; fallback = t }
             }
-            return bestScore >= 4 ? best : ""
+            if bestScore >= 3 { return best }
+            return fallback
         }
 
-        /// 收集 (字段名, 值)：会钻进 feature / feature2 那层转义 JSON，并保留内层字段名
+        /// 收集 (字段名, 值)：既钻进 feature / feature2 那层转义 JSON，也钻进普通的嵌套对象/数组，
+        /// 保留内层字段名（图片常挂在 `{"image":{"url": ...}}` 这种嵌套里）
         private static func pairs(_ dict: [String: Any], _ depth: Int = 0) -> [(String, String)] {
-            guard depth <= 2 else { return [] }
+            guard depth <= 3 else { return [] }
             var out: [(String, String)] = []
             for (k, v) in dict {
+                if let d = v as? [String: Any] {
+                    out.append(contentsOf: pairs(d, depth + 1))
+                    continue
+                }
+                if let a = v as? [Any] {
+                    for e in a {
+                        if let d = e as? [String: Any] { out.append(contentsOf: pairs(d, depth + 1)) }
+                        else if let s = (e as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) {
+                            out.append((k, s))
+                        }
+                    }
+                    continue
+                }
                 guard let s = (v as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) else { continue }
                 if (s.hasPrefix("{") || s.hasPrefix("[")) && s.count >= 2,
                    let data = s.data(using: .utf8),
@@ -133,6 +174,17 @@ enum Cainiao {
             return out
         }
 
+        /// 「已经拿走/已签收」的记录：菜鸟接口按 30 天返回，不筛会把取过的也列出来
+        private static let doneWords = ["已取件", "已取走", "已领取", "已领", "已妥投", "已完成",
+                                        "已取消", "已退回", "已签收", "交易关闭", "已过期"]
+        private static let pendingWords = ["待取", "未取", "待领取", "待自提", "已入库", "已到站", "待签收"]
+
+        static func isDone(_ vals: [String]) -> Bool {
+            let text = vals.joined(separator: " ")
+            if pendingWords.contains(where: { text.contains($0) }) { return false }
+            return doneWords.contains(where: { text.contains($0) })
+        }
+
         static func items(from root: Any?) -> [PickupItem] {
             var out: [PickupItem] = []
             var seen: Set<String> = []
@@ -146,11 +198,11 @@ enum Cainiao {
 
             if let dict = node as? [String: Any] {
                 if let hit = codeOf(dict) {
-                    if !seen.contains(hit) {
+                    let ps = pairs(dict)
+                    let cand = ps.map { $0.1 }
+                    // 已经取走/签收的也会被这个接口按「近 30 天」返回，这里筛掉
+                    if !seen.contains(hit) && !isDone(cand) {
                         seen.insert(hit)
-                        // 驿站名常常藏在 feature / feature2 里那层转义过的 JSON（postName / daishouName）
-                        let ps = pairs(dict)
-                        let cand = ps.map { $0.1 }
                         var station = ""
                         var bestScore = 0
                         var place = ""

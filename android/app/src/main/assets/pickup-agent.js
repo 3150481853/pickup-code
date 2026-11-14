@@ -145,21 +145,19 @@
         return best;
     }
 
-    // 每条左侧的主图：优先 <img>，其次 background-image。
-    // 阿里/拼多多的图常常是相对路径或 //img.xxx，这里统一补成绝对地址。
-    // 打分挑：商品图（pddpic / 大图）优先，快递公司 logo、图标、头像一律不要，
-    // 之前按「第一个 img」取，经常把圆通/中通的 logo 当成快递图显示。
+    // 每条左侧的主图：优先商品图，没有就用快递公司 logo 兜底（总比空着强）。
+    // 埋点像素、占位图、动图一律跳过。
     function imgOf(node) {
         if (!node) { return ''; }
-        var BAD = /(icon|logo|avatar|sprite|badge|flag|qr|loading|placeholder|blank|1x1)\.(png|jpe?g|webp|gif)/i;
+        var JUNK = /(1x1|track|placeholder|loading|blank|pixel)\.(png|jpe?g|webp|gif)/i;
         var best = '';
         var bestScore = 0;
+        var fallback = '';
         var imgs = node.querySelectorAll ? node.querySelectorAll('img') : [];
         for (var i = 0; i < imgs.length && i < 30; i++) {
             var im = imgs[i];
             var s = im.getAttribute('src') || im.getAttribute('data-src') || '';
-            if (!s || /^data:/.test(s)) { continue; }
-            if (BAD.test(s)) { continue; }
+            if (!s || /^data:/.test(s) || JUNK.test(s)) { continue; }
             var w = im.naturalWidth || im.width || parseInt(im.getAttribute('width') || '0', 10) || 0;
             var cls = (im.className || '') + ' ' + ((im.parentNode && im.parentNode.className) || '');
             var score = 0;
@@ -168,18 +166,21 @@
             if (w >= 48) { score += 2; }
             if (/alicdn|\.(jpg|jpeg|png|webp)/i.test(s)) { score += 1; }
             if (score > bestScore) { bestScore = score; best = s; }
+            // 兜底候选：任何一张看得过去的图（拼多多代收页通常只有快递公司 logo）
+            if (!fallback && w >= 20) { fallback = s; }
         }
-        if (!best || bestScore < 3) {
+        if (!fallback) {
             var all = node.querySelectorAll ? node.querySelectorAll('div,span,a') : [];
             for (var j = 0; j < all.length && j < 60; j++) {
                 var bg = '';
                 try { bg = window.getComputedStyle(all[j]).backgroundImage || ''; } catch (e) { bg = ''; }
                 var m = bg.match(/url\(["']?(https?:\/\/[^"')]+)/);
-                if (m && !BAD.test(m[1]) && /pddpic|hdslb|\.(jpg|jpeg|png|webp)/i.test(m[1])) { best = m[1]; break; }
+                if (m && !JUNK.test(m[1]) && /pddpic|hdslb|\.(jpg|jpeg|png|webp)/i.test(m[1])) { fallback = m[1]; break; }
             }
         }
-        if (!best) { return ''; }
-        try { return new URL(best, location.href).href; } catch (e) { return best; }
+        var pick = (bestScore >= 3 && best) ? best : (fallback || best);
+        if (!pick) { return ''; }
+        try { return new URL(pick, location.href).href; } catch (e) { return pick; }
     }
 
     // ---- 拼多多：官方结构 ----

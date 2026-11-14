@@ -190,13 +190,15 @@ public class Mtop {
 
             String code = codeOf(o);
             if (code != null && !seen.contains(code)) {
-                seen.add(code);
                 // 驿站名常常藏在 feature / feature2 里那层转义过的 JSON（postName / daishouName）
                 List<String> cand = new ArrayList<>();
                 collect(o, cand, 0);
                 List<String[]> pairs = collectPairs(o, 0);
-                out.add(new PickupItem(code, "cainiao", stationOf(cand), placeOf(cand),
-                        mailNoOf(cand), imgOf(pairs)));
+                if (!isDone(cand)) {
+                    seen.add(code);
+                    out.add(new PickupItem(code, "cainiao", stationOf(cand), placeOf(cand),
+                            mailNoOf(cand), imgOf(pairs)));
+                }
             }
             for (java.util.Iterator<String> it = o.keys(); it.hasNext(); ) {
                 Object v = o.opt(it.next());
@@ -271,40 +273,77 @@ public class Mtop {
             }
         }
 
-        /** 主图：宁可没有图（UI 用站点图标兜底），也不要放错图 */
+        /** 主图：优先商品图；没有就用快递公司 logo 兜底（总比空着强） */
         static String imgOf(List<String[]> pairs) {
             String best = "";
             int bestScore = 0;
+            String fallback = "";
+            int fbScore = 0;
             for (String[] kv : pairs) {
                 String key = kv[0] == null ? "" : kv[0].toLowerCase();
                 String t = kv[1] == null ? "" : kv[1].trim();
                 if (!t.startsWith("http") || t.length() < 18 || t.length() > 600) continue;
                 String low = t.toLowerCase();
-                String[] bad = {"icon", "logo", "avatar", "sprite", "banner", "advert", "ad_",
-                        "track", "1x1", "loading", "placeholder", "default_img", "defaultimg", ".gif"};
-                boolean skip = false;
-                for (String b : bad) if (low.contains(b)) { skip = true; break; }
-                if (skip) continue;
+                if (low.contains("1x1") || low.contains("track") || low.contains("placeholder")
+                        || low.contains("loading") || low.endsWith(".gif")) continue;
                 int score = 0;
                 if (key.contains("img") || key.contains("pic") || key.contains("photo")
-                        || key.contains("image")) score += 4;
+                        || key.contains("image") || key.contains("url")) score += 4;
                 if (low.contains("/bao/uploaded/") || low.contains("imgextra")) score += 4;
                 if (low.contains("alicdn.com/img") || low.contains("img.alicdn")) score += 3;
+                else if (low.contains("alicdn.com") || low.contains("taobaocdn")) score += 2;
                 if (low.endsWith(".jpg") || low.endsWith(".jpeg")
                         || low.endsWith(".png") || low.endsWith(".webp")) score += 2;
                 if (low.matches("(?s).*_[4-9][0-9]{2}x[4-9][0-9]{2}.*")) score += 1;
                 if (score > bestScore) { bestScore = score; best = t; }
+
+                int fb = 0;
+                if (key.contains("logo") || key.contains("icon") || key.contains("brand")
+                        || key.contains("company") || key.contains("express")) fb += 3;
+                if (low.endsWith(".jpg") || low.endsWith(".jpeg")
+                        || low.endsWith(".png") || low.endsWith(".webp")) fb += 2;
+                else if (low.contains("alicdn") || low.contains("pddpic") || low.contains("hdslb")) fb += 1;
+                if (fb > fbScore) { fbScore = fb; fallback = t; }
             }
-            return bestScore >= 4 ? best : "";
+            if (bestScore >= 3) return best;
+            return fallback;
         }
 
-        /** 收集 (字段名, 值)：会钻进 feature / feature2 那层转义 JSON，并保留内层字段名 */
+        /** 已经取走/签收的也会被这个接口按近 30 天返回，这里筛掉 */
+        static boolean isDone(List<String> vals) {
+            StringBuilder sb = new StringBuilder();
+            for (String s : vals) { if (s != null) sb.append(s).append(' '); }
+            String text = sb.toString();
+            for (String w : new String[]{"待取", "未取", "待领取", "待自提", "已入库", "已到站", "待签收"}) {
+                if (text.contains(w)) return false;
+            }
+            for (String w : new String[]{"已取件", "已取走", "已领取", "已领", "已妥投", "已完成",
+                    "已取消", "已退回", "已签收", "交易关闭", "已过期"}) {
+                if (text.contains(w)) return true;
+            }
+            return false;
+        }
+
+        /** 收集 (字段名, 值)：既钻进 feature / feature2 那层转义 JSON，也钻进普通嵌套对象/数组 */
         static List<String[]> collectPairs(JSONObject o, int depth) {
             List<String[]> out = new ArrayList<>();
-            if (depth > 2) return out;
+            if (depth > 3) return out;
             for (java.util.Iterator<String> it = o.keys(); it.hasNext(); ) {
                 String k = it.next();
                 Object v = o.opt(k);
+                if (v instanceof JSONObject) {
+                    out.addAll(collectPairs((JSONObject) v, depth + 1));
+                    continue;
+                }
+                if (v instanceof JSONArray) {
+                    JSONArray arr = (JSONArray) v;
+                    for (int i = 0; i < arr.length(); i++) {
+                        Object e = arr.opt(i);
+                        if (e instanceof JSONObject) out.addAll(collectPairs((JSONObject) e, depth + 1));
+                        else if (e instanceof String) out.add(new String[]{k, ((String) e).trim()});
+                    }
+                    continue;
+                }
                 if (!(v instanceof String)) continue;
                 String s = ((String) v).trim();
                 if (s.length() >= 2 && s.startsWith("{") && s.endsWith("}")) {

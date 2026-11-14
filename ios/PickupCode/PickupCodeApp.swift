@@ -90,11 +90,19 @@ final class AppModel: ObservableObject {
             guard let self = self else { return }
             var t = "ret: " + reply.ret + "\n原生抓到 " + String(items.count) + " 件"
             if !items.isEmpty {
-                t += "\n" + items.prefix(12).map { $0.code + " ｜ " + $0.station + " ｜ " + $0.place }.joined(separator: "\n")
+                let withImg = items.filter { !$0.img.isEmpty }.count
+                t += "（有主图 " + String(withImg) + " 件）"
+                t += "\n" + items.prefix(12).map {
+                    $0.code + " ｜ " + $0.station + " ｜ " + $0.place
+                        + " ｜ img=" + ($0.img.isEmpty ? "-" : String($0.img.prefix(60)))
+                }.joined(separator: "\n")
             }
             // 成功也带上 raw 样本：返回结构没有文档，只能靠真数据对齐字段名
             // （0.9.0 就是因为没看过 raw，把「校园快递服务中心」当成驿站名了）。
             if !reply.raw.isEmpty { t += "\nraw: " + String(reply.raw.prefix(2000)) }
+            // 主图取不到时，得知道返回里到底有没有图片地址：把所有 http 串挑几条出来
+            let urls = Cainiao.Parser.imageCandidates(reply.raw, limit: 6)
+            if !urls.isEmpty { t += "\n图片候选: " + urls.joined(separator: "  ,  ") }
             self.diag.append(("菜鸟接口", t))
         }
     }
