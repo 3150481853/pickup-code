@@ -194,8 +194,9 @@ public class Mtop {
                 // 驿站名常常藏在 feature / feature2 里那层转义过的 JSON（postName / daishouName）
                 List<String> cand = new ArrayList<>();
                 collect(o, cand, 0);
+                List<String[]> pairs = collectPairs(o, 0);
                 out.add(new PickupItem(code, "cainiao", stationOf(cand), placeOf(cand),
-                        mailNoOf(cand), imgOf(cand)));
+                        mailNoOf(cand), imgOf(pairs)));
             }
             for (java.util.Iterator<String> it = o.keys(); it.hasNext(); ) {
                 Object v = o.opt(it.next());
@@ -270,6 +271,61 @@ public class Mtop {
             }
         }
 
+        /** 主图：宁可没有图（UI 用站点图标兜底），也不要放错图 */
+        static String imgOf(List<String[]> pairs) {
+            String best = "";
+            int bestScore = 0;
+            for (String[] kv : pairs) {
+                String key = kv[0] == null ? "" : kv[0].toLowerCase();
+                String t = kv[1] == null ? "" : kv[1].trim();
+                if (!t.startsWith("http") || t.length() < 18 || t.length() > 600) continue;
+                String low = t.toLowerCase();
+                String[] bad = {"icon", "logo", "avatar", "sprite", "banner", "advert", "ad_",
+                        "track", "1x1", "loading", "placeholder", "default_img", "defaultimg", ".gif"};
+                boolean skip = false;
+                for (String b : bad) if (low.contains(b)) { skip = true; break; }
+                if (skip) continue;
+                int score = 0;
+                if (key.contains("img") || key.contains("pic") || key.contains("photo")
+                        || key.contains("image")) score += 4;
+                if (low.contains("/bao/uploaded/") || low.contains("imgextra")) score += 4;
+                if (low.contains("alicdn.com/img") || low.contains("img.alicdn")) score += 3;
+                if (low.endsWith(".jpg") || low.endsWith(".jpeg")
+                        || low.endsWith(".png") || low.endsWith(".webp")) score += 2;
+                if (low.matches("(?s).*_[4-9][0-9]{2}x[4-9][0-9]{2}.*")) score += 1;
+                if (score > bestScore) { bestScore = score; best = t; }
+            }
+            return bestScore >= 4 ? best : "";
+        }
+
+        /** 收集 (字段名, 值)：会钻进 feature / feature2 那层转义 JSON，并保留内层字段名 */
+        static List<String[]> collectPairs(JSONObject o, int depth) {
+            List<String[]> out = new ArrayList<>();
+            if (depth > 2) return out;
+            for (java.util.Iterator<String> it = o.keys(); it.hasNext(); ) {
+                String k = it.next();
+                Object v = o.opt(k);
+                if (!(v instanceof String)) continue;
+                String s = ((String) v).trim();
+                if (s.length() >= 2 && s.startsWith("{") && s.endsWith("}")) {
+                    try { out.addAll(collectPairs(new JSONObject(s), depth + 1)); continue; }
+                    catch (Exception ignored) {}
+                }
+                if (s.length() >= 2 && s.startsWith("[") && s.endsWith("]")) {
+                    try {
+                        JSONArray arr = new JSONArray(s);
+                        for (int i = 0; i < arr.length(); i++) {
+                            Object e = arr.opt(i);
+                            if (e instanceof JSONObject) out.addAll(collectPairs((JSONObject) e, depth + 1));
+                        }
+                        continue;
+                    } catch (Exception ignored) {}
+                }
+                out.add(new String[]{k, s});
+            }
+            return out;
+        }
+
         static boolean isCode(String s) {
             if (s == null) return false;
             if (!s.matches("^[0-9]{1,4}-[0-9]{1,7}-[0-9]{3,7}$")) return false;
@@ -333,22 +389,6 @@ public class Mtop {
                 }
             }
             return loose;
-        }
-
-        /** 主图：挑一个像图片的绝对地址 */
-        static String imgOf(List<String> cand) {
-            String first = "";
-            for (String s : cand) {
-                if (s == null) continue;
-                String t = s.trim();
-                if (!t.startsWith("http") || t.length() < 18 || t.length() > 500) continue;
-                String low = t.toLowerCase();
-                boolean looks = low.contains(".jpg") || low.contains(".jpeg") || low.contains(".png")
-                        || low.contains(".webp") || low.contains("alicdn") || low.contains("img.");
-                if (looks) return t;
-                if (first.isEmpty()) first = t;
-            }
-            return first;
         }
     }
 }

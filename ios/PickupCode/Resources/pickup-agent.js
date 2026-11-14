@@ -147,23 +147,35 @@
 
     // 每条左侧的主图：优先 <img>，其次 background-image。
     // 阿里/拼多多的图常常是相对路径或 //img.xxx，这里统一补成绝对地址。
+    // 打分挑：商品图（pddpic / 大图）优先，快递公司 logo、图标、头像一律不要，
+    // 之前按「第一个 img」取，经常把圆通/中通的 logo 当成快递图显示。
     function imgOf(node) {
         if (!node) { return ''; }
+        var BAD = /(icon|logo|avatar|sprite|badge|flag|qr|loading|placeholder|blank|1x1)\.(png|jpe?g|webp|gif)/i;
         var best = '';
+        var bestScore = 0;
         var imgs = node.querySelectorAll ? node.querySelectorAll('img') : [];
-        for (var i = 0; i < imgs.length; i++) {
-            var s = imgs[i].getAttribute('src') || imgs[i].getAttribute('data-src') || '';
+        for (var i = 0; i < imgs.length && i < 30; i++) {
+            var im = imgs[i];
+            var s = im.getAttribute('src') || im.getAttribute('data-src') || '';
             if (!s || /^data:/.test(s)) { continue; }
-            if (!best) { best = s; }
-            if (/alicdn|hdslb|pddpic|picasso|\.(jpg|jpeg|png|webp)/i.test(s)) { best = s; break; }
+            if (BAD.test(s)) { continue; }
+            var w = im.naturalWidth || im.width || parseInt(im.getAttribute('width') || '0', 10) || 0;
+            var cls = (im.className || '') + ' ' + ((im.parentNode && im.parentNode.className) || '');
+            var score = 0;
+            if (/pddpic|hdslb|picasso/i.test(s)) { score += 4; }      // 拼多多商品图
+            if (/goods|item|prod|thumb|pic/i.test(cls)) { score += 3; }
+            if (w >= 48) { score += 2; }
+            if (/alicdn|\.(jpg|jpeg|png|webp)/i.test(s)) { score += 1; }
+            if (score > bestScore) { bestScore = score; best = s; }
         }
-        if (!best) {
+        if (!best || bestScore < 3) {
             var all = node.querySelectorAll ? node.querySelectorAll('div,span,a') : [];
             for (var j = 0; j < all.length && j < 60; j++) {
                 var bg = '';
                 try { bg = window.getComputedStyle(all[j]).backgroundImage || ''; } catch (e) { bg = ''; }
                 var m = bg.match(/url\(["']?(https?:\/\/[^"')]+)/);
-                if (m) { best = m[1]; break; }
+                if (m && !BAD.test(m[1]) && /pddpic|hdslb|\.(jpg|jpeg|png|webp)/i.test(m[1])) { best = m[1]; break; }
             }
         }
         if (!best) { return ''; }

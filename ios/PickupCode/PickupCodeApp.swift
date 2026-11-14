@@ -574,28 +574,7 @@ struct HomeView: View {
 
     /// 左侧主图：菜鸟/拼多多给的快递图或商品图；没图时用站点图标顶一下
     private func thumb(_ item: PickupItem) -> some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 10).fill(Color.black.opacity(0.06))
-            if !item.img.isEmpty, let u = URL(string: item.img) {
-                AsyncImage(url: u) { phase in
-                    if let img = phase.image {
-                        img.resizable().scaledToFill()
-                    } else {
-                        thumbFallback(item)
-                    }
-                }
-                .frame(width: 54, height: 54)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-            } else {
-                thumbFallback(item)
-            }
-        }
-        .frame(width: 54, height: 54)
-    }
-
-    private func thumbFallback(_ item: PickupItem) -> some View {
-        Text(item.site == "pdd" ? "🛒" : (item.site == "cainiao" ? "📦" : "🏷"))
-            .font(.system(size: 24))
+        Thumb(item: item, side: 54)
     }
 
     private func metaText(_ item: PickupItem) -> String {

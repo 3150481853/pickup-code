@@ -56,23 +56,6 @@ enum Cainiao {
             return s.range(of: "^[A-Za-z]?[0-9]{1,3}-[0-9]{1,3}$", options: .regularExpression) != nil
         }
 
-        /// 商品主图：接口里的图基本都在 alicdn 上，认 http(s) + 图片后缀/常见图床
-        static func imgOf(_ cand: [String]) -> String {
-            var fallback = ""
-            for s in cand {
-                let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard t.hasPrefix("http"), t.count > 18, t.count < 500 else { continue }
-                let low = t.lowercased()
-                if low.hasSuffix(".jpg") || low.hasSuffix(".jpeg") || low.hasSuffix(".png")
-                    || low.hasSuffix(".webp") || low.contains("alicdn.com/img")
-                    || low.contains("img.alicdn") || low.contains("gw.alicdn") {
-                    return t
-                }
-                if fallback.isEmpty { fallback = t }
-            }
-            return fallback
-        }
-
         /// 快递单号：YT7656364590990 / JT3184428901216，或 12~18 位纯数字（丹鸟/韵达那种）
         static let mailPattern = "(?<![A-Za-z0-9])(?:[A-Z]{2,3}[0-9]{8,14}|[0-9]{12,18})(?![0-9])"
 
@@ -93,6 +76,63 @@ enum Cainiao {
             return loose
         }
 
+        /// 商品主图：宁可没有图（用站点图标兜底），也不要放错图。
+        /// 之前按「第一个 http 串」取，结果取到了快递 logo / 广告图 / 埋点像素，看着就是「图不对」。
+        static func imgOf(_ pairs: [(String, String)]) -> String {
+            var best = ""
+            var bestScore = 0
+            for (key, value) in pairs {
+                let t = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard t.hasPrefix("http"), t.count > 18, t.count < 600 else { continue }
+                let low = t.lowercased()
+                let lk = key.lowercased()
+                // 明显不是商品图的东西：图标、头像、广告位、埋点、占位图
+                let bad = ["icon", "logo", "avatar", "sprite", "banner", "advert", "ad_",
+                           "track", "1x1", "loading", "placeholder", "default_img",
+                           "defaultimg", ".gif"]
+                if bad.contains(where: { low.contains($0) }) { continue }
+                var score = 0
+                // 字段名直接说「这是图」
+                if lk.contains("img") || lk.contains("pic") || lk.contains("photo")
+                    || lk.contains("image") { score += 4 }
+                // 淘宝/菜鸟商品图的常见图床路径
+                if low.contains("/bao/uploaded/") || low.contains("imgextra") { score += 4 }
+                if low.contains("alicdn.com/img") || low.contains("img.alicdn") { score += 3 }
+                if low.hasSuffix(".jpg") || low.hasSuffix(".jpeg")
+                    || low.hasSuffix(".png") || low.hasSuffix(".webp") { score += 2 }
+                // 大图优先（_800x800 / _400x400 这种）
+                if low.range(of: "_[4-9][0-9]{2}x[4-9][0-9]{2}",
+                             options: .regularExpression) != nil { score += 1 }
+                if score > bestScore { bestScore = score; best = t }
+            }
+            return bestScore >= 4 ? best : ""
+        }
+
+        /// 收集 (字段名, 值)：会钻进 feature / feature2 那层转义 JSON，并保留内层字段名
+        private static func pairs(_ dict: [String: Any], _ depth: Int = 0) -> [(String, String)] {
+            guard depth <= 2 else { return [] }
+            var out: [(String, String)] = []
+            for (k, v) in dict {
+                guard let s = (v as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) else { continue }
+                if (s.hasPrefix("{") || s.hasPrefix("[")) && s.count >= 2,
+                   let data = s.data(using: .utf8),
+                   let inner = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) {
+                    if let d = inner as? [String: Any] {
+                        out.append(contentsOf: pairs(d, depth + 1))
+                        continue
+                    }
+                    if let a = inner as? [Any] {
+                        for e in a where (e as? [String: Any]) != nil {
+                            out.append(contentsOf: pairs(e as! [String: Any], depth + 1))
+                        }
+                        continue
+                    }
+                }
+                out.append((k, s))
+            }
+            return out
+        }
+
         static func items(from root: Any?) -> [PickupItem] {
             var out: [PickupItem] = []
             var seen: Set<String> = []
@@ -109,7 +149,8 @@ enum Cainiao {
                     if !seen.contains(hit) {
                         seen.insert(hit)
                         // 驿站名常常藏在 feature / feature2 里那层转义过的 JSON（postName / daishouName）
-                        let cand = collect(dict)
+                        let ps = pairs(dict)
+                        let cand = ps.map { $0.1 }
                         var station = ""
                         var bestScore = 0
                         var place = ""
@@ -124,7 +165,7 @@ enum Cainiao {
                                               station: station, place: place,
                                               raw: String(rest.joined(separator: " / ").prefix(120)),
                                               seenAt: Date(),
-                                              img: imgOf(cand),
+                                              img: imgOf(ps),
                                               mailNo: mailNoOf(cand)))
                     }
                 }
