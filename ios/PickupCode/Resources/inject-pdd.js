@@ -282,6 +282,27 @@
   }
 
   // ---------- 五、启动 ----------
+  // 拼多多「请确认继续用当前账号登录」那一屏的「快速进入」是要拉拼多多 App 的，
+  // 壳里把 pinduoduo:// 拦掉了，所以点了等于没反应。把它藏掉，留一条能走通的路。
+  function fixLoginConfirm() {
+    var nodes = document.querySelectorAll('div,button,span,a');
+    var hit = null;
+    for (var i = 0; i < nodes.length; i++) {
+      var el = nodes[i];
+      if (el.childElementCount === 0 && (el.textContent || '').trim() === '快速进入') { hit = el; break; }
+    }
+    if (!hit) return;
+    var btn = hit.parentNode || hit;
+    if (btn.getAttribute('data-pdd-hidden') === '1') return;
+    btn.setAttribute('data-pdd-hidden', '1');
+    btn.style.display = 'none';
+    var tip = document.createElement('div');
+    tip.textContent = '「快速进入」要跳到拼多多 App，这个壳里用不了。请点下面的「使用其他账号登录」，用手机号或扫码登录。';
+    tip.setAttribute('style', 'margin:10px 16px;padding:10px 12px;border-radius:8px;'
+      + 'background:#fff3f5;color:#c81e3c;font-size:12px;line-height:1.6;');
+    btn.parentNode.insertBefore(tip, btn);
+  }
+
   function boot() {
     var style = document.createElement('style');
     style.textContent = [
@@ -298,12 +319,18 @@
       bindPicker();
     }
     bindBigCode();
+    fixLoginConfirm();
 
     // SPA 会不停重绘，节流后再扫一遍
     var t = null;
     var mo = new MutationObserver(function () {
       if (t) return;
-      t = setTimeout(function () { t = null; applyHidden(); sweepJunk(); }, 600);
+      t = setTimeout(function () {
+        t = null;
+        applyHidden();
+        sweepJunk();
+        fixLoginConfirm();
+      }, 600);
     });
     var root = document.getElementById('__next') || document.body;
     mo.observe(root, { childList: true, subtree: true });

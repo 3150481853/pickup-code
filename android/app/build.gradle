@@ -10,14 +10,14 @@ android {
         applicationId "local.pickup.android"
         minSdk 24
         targetSdk 34
-        versionCode 15
-        versionName "0.11.0"
+        versionCode 16
+        versionName "0.12.0"
     }
 
     signingConfigs {
         release {
             // 自用 App：签名密钥就放在仓库里，保证每次升级能覆盖安装
-            // （debug 密钥每次 CI 都是新的，装第二次就得先卸载）。
+            // （debug 密钥每次 CI 都是新的，装第二次就得先卸载）
             storeFile file("../keystore.jks")
             storePassword "pickup123"
             keyAlias "pickup"

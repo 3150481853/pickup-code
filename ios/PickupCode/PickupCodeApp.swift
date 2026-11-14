@@ -107,6 +107,7 @@ struct ContentView: View {
     @State private var selected = 0     // 0 = 首页，1..3 = 三个站点
     @State private var showDiag = false
     @State private var showMenu = false
+    @State private var confirmClear = false
 
     private var titles: [String] { ["首页"] + Sites.all.map { $0.tabTitle } }
 
@@ -156,8 +157,29 @@ struct ContentView: View {
             tabBar
         }
         .onAppear { model.startAll() }
+        .alert("清除这个站点的登录状态？", isPresented: $confirmClear) {
+            Button("清除并重新登录", role: .destructive) {
+                if selected > 0 { clearLogin(model.boxes[selected - 1]) }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("会清掉 App 里这个站点的 Cookie 和网页数据，回到入口重新登录。首页已有的取件码不受影响。")
+        }
         .sheet(isPresented: $showDiag) {
             DiagView(model: model, isPresented: $showDiag)
+        }
+    }
+
+    // 换号用：清掉 WebView 的所有 Cookie / 本地存储，再回入口
+    private func clearLogin(_ box: WebBox) {
+        let dataStore = WKWebsiteDataStore.default()
+        dataStore.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(),
+                            modifiedSince: .distantPast) {
+            DispatchQueue.main.async {
+                box.backToEntry()
+                box.reload()
+                model.diagnoseAll()
+            }
         }
     }
 
@@ -184,6 +206,9 @@ struct ContentView: View {
                 }
                 siteButton("抓一次", "hand.tap.fill") {
                     model.boxes[selected - 1].collect()
+                }
+                siteButton("清除登录", "trash") {
+                    confirmClear = true
                 }
             }
             Button {

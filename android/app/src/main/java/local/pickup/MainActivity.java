@@ -25,6 +25,7 @@ import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
+import android.webkit.WebStorage;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.EditText;
@@ -61,6 +62,7 @@ public class MainActivity extends Activity {
     static final String TAOBAO_LOGIN = "https://login.taobao.com/member/login.jhtml?style=minisimple&redirectURL=";
 
     static final String[] TABS = {"首页", "菜鸟取件", "拼多多", "淘宝取件"};
+    static final String[] TAB_ICONS = {"🏠", "📦", "🛒", "🏷"};
     static final String[] SITE_IDS = {null, "cainiao", "pdd", "taobao"};
     static final String[] ENTRIES = {null, CAINIAO_ENTRY, PDD_ENTRY, TAOBAO_ENTRY};
 
@@ -367,7 +369,8 @@ public class MainActivity extends Activity {
 
         for (String[] item : new String[][]{
                 {"整页登录", "login"}, {"刷新页面", "reload"},
-                {"回到入口", "entry"}, {"抓一次", "collect"}}) {
+                {"回到入口", "entry"}, {"抓一次", "collect"},
+                {"清除登录", "clearlogin"}}) {
             TextView btn = new TextView(this);
             btn.setText(item[0]);
             btn.setTextSize(13);
@@ -430,7 +433,12 @@ public class MainActivity extends Activity {
             LinearLayout cell = new LinearLayout(this);
             cell.setOrientation(LinearLayout.VERTICAL);
             cell.setGravity(Gravity.CENTER);
-            cell.setPadding(0, dp(9), 0, dp(7));
+            cell.setPadding(0, dp(8), 0, dp(5));
+            TextView ic = new TextView(this);
+            ic.setText(TAB_ICONS[i]);
+            ic.setTextSize(17);
+            ic.setGravity(Gravity.CENTER);
+            cell.addView(ic);
             TextView t = new TextView(this);
             t.setText(TABS[i]);
             t.setTextSize(12);
@@ -592,7 +600,45 @@ public class MainActivity extends Activity {
                 wv.evaluateJavascript("(function(){try{if(window.__pickupCollect)window.__pickupCollect();}catch(e){}})()", null);
                 Toast.makeText(this, "抓了一次", Toast.LENGTH_SHORT).show();
                 break;
+            case "clearlogin":
+                confirmClearLogin(idx);
+                break;
         }
+    }
+
+    // 换号用：清掉这个站点（其实是整个 WebView 的）Cookie 与网页数据，再回入口
+    void confirmClearLogin(int idx) {
+        new AlertDialog.Builder(this)
+                .setTitle("清除 " + SITE_NAME_CN(idx) + " 的登录状态？")
+                .setMessage("会清掉 App 里的 Cookie 和网页数据，回到入口重新登录。首页已有的取件码不受影响。")
+                .setPositiveButton("清除并重新登录", (d, w) -> clearLogin(idx))
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    void clearLogin(int idx) {
+        CookieManager cm = CookieManager.getInstance();
+        cm.removeAllCookies(done -> {
+            cm.flush();
+            WebStorage.getInstance().deleteAllData();
+            for (int i = 1; i < webs.length; i++) {
+                if (webs[i] == null) continue;
+                webs[i].clearCache(true);
+                webs[i].clearFormData();
+                webs[i].clearHistory();
+            }
+            runOnUiThread(() -> {
+                ensureWeb(idx);
+                webs[idx].loadUrl(ENTRIES[idx]);
+                store.setCollected(SITE_IDS[idx], new ArrayList<>(), "已清除登录");
+                Toast.makeText(this, "已清除，重新登录一次", Toast.LENGTH_SHORT).show();
+            });
+        });
+    }
+
+    String SITE_NAME_CN(int idx) {
+        String id = SITE_IDS[idx];
+        return id == null ? "首页" : store.siteLabel(id);
     }
 
     // ---------------- 数据 ----------------
