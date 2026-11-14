@@ -379,12 +379,12 @@ public class MainActivity extends Activity {
         pinBtn.setOnClickListener(v -> {
             store.togglePin(it.code);
             closeOpenRow();
-            refreshHome();
+            renderHome();
         });
         delBtn.setOnClickListener(v -> {
             store.dismiss(it);
             closeOpenRow();
-            refreshHome();
+            renderHome();
         });
 
         attachSwipe(card, it);
