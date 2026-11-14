@@ -111,31 +111,46 @@ pinduoduo://com.xunmeng.pinduoduo/mdkd/package?tab=ID_CODE
 
 ---
 
-## 六、方案 C：自签 ipa（体验最接近 HandyCode）
+## 六、方案 C：自签 ipa（已跑通，出过可安装的包）
 
-工程已经写好了（`ios/` 目录）：SwiftUI + WKWebView 壳，三个常驻标签页，每个页面各自注入脚本。
+工程在 `ios/`：SwiftUI + WKWebView 壳，**四个底栏**，页面常驻不重载。
 
-- 打开即身份码，无地址栏
-- 桌面图标直达
-- 登录态用 `WKWebsiteDataStore.default()` 落盘，切页只移动视图、不重载
-- 站外链接扔给 Safari，自定义 scheme（`pinduoduo://`）交给系统
+### 首页 = 所有待取件汇总
 
-### 聚合三个平台（这是解决「菜鸟看不到圆通件」的关键）
+打开 App 第一屏就是汇总列表：每行一个取件码（大号等宽字体）+ 来源标签 + 驿站/货位，**点一下就复制**。顶上「刷新全部」把三个站点的页面重新拉一遍。空列表时会显示每个站点的状态（如「未登录 / 登录中」「抓到 7 件」），方便判断该去哪个标签登录。
+
+抓取靠注入的 `ios/PickupCode/Resources/pickup-agent.js`：拼多多读官方 DOM（`[class*="package-list-picking"]` 里的 `.package-code-value` / `.station-name` / `.package-tags`），淘宝菜鸟没有稳定结构，退化成「取件码 `\d{1,3}-\d{1,2}-\d{3,6}` + 就近文本找驿站/货架」的启发式。页面变化由 MutationObserver 自动重抓，另有 25 秒定时兜底。
+
+### 站点入口
 
 | 标签 | 官方入口 | 能看到什么 |
 | --- | --- | --- |
 | 拼多多 | `m.pinduoduo.net/mdkd/package?tab=ID_CODE` | 身份码 + 待取包裹（淘宝/天猫里被拼多多代收的件，主要是圆通） |
-| 淘宝取件 | `pages-fast.m.taobao.com/wow/z/uniapp/1011717/last-mile-fe/end-collect-platform/identity-code` | 身份码 + 待取包裹（菜鸟那一侧的取件码） |
+| 淘宝取件 | `pages-fast.m.taobao.com/wow/z/uniapp/1100333/last-mile-fe/m-end-school-tab/home` | 驿站/学校 tab 的**待取件列表**（菜鸟那一侧的取件码都在这里） |
 | 菜鸟码 | `page.cainiao.com/cn-app-web/identity-code/index.html#/` | 菜鸟官方身份码（登录态与淘宝共用） |
 
-三个都是**官方网页**，App 不解析、不缓存、不上传你的码。淘宝和菜鸟共用淘宝登录态，拼多多单独登录。
+淘宝那个入口特意没用 `end-collect-platform/identity-code` —— 那页**只有身份码、没有包裹列表**，聚合拿不到东西；HandyCode 也是把 `m-end-school-tab/home` 当「待取包裹」入口用的。
 
-**但是：这台 Windows 电脑编不出 ipa。** iOS 二进制必须用 Apple 的 iOS SDK（只在 macOS 上）链接，本机 `clang`/`swift`/iOS SDK 全都没有，WSL 也没装发行版。所以只能云编译：
+### 壳里修掉的三件事
 
-- 流水线我写好了：`.github/workflows/ios-unsigned.yml`（macos-14 + XcodeGen + `CODE_SIGNING_ALLOWED=NO`）
-- 你推上 GitHub → Actions 跑一次 → 下载 **未签名 ipa** → 全能签签名安装
+1. **拼多多登录不再跳 App**：`pinduoduo://` / `intent://` / `taobao://` 这类 scheme 一律 `.cancel`，页面里「打开拼多多App」的按钮也拦掉。所以拼多多要在壳内**用扫码或手机验证码登录**，不会再被拽去 App。
+2. **淘宝/菜鸟验证码能走完**：实现了 `WKUIDelegate.createWebViewWith`，把 `target=_blank` 的弹窗就地加载（返回 `nil` 不新开窗口），并覆盖 `window.open`。不动这个的话，点「获取验证码」就是没反应。
+3. **登录横条不再挤掉表单**：「您需要登录才能继续访问」那条和它的 iframe 会被归零重排。
 
-详细步骤在 [ios/BUILD.md](ios/BUILD.md)。
+### 已知代价（诚实说）
+
+- **iOS 第三方 Cookie**：淘宝登录框是 `login.m.taobao.com` 的 iframe，相对菜鸟/淘宝页面属于第三方。Safari/WKWebView 的 ITP 有可能让这类 iframe 登录走不通；走不通时的表现是登录框一直在转或者报错。这需要真机试，试出来的结果再决定要不要改成「先跳整页登录、回来再进列表」。
+- **网页端和 App 登录会互踢**：同一账号在网页端登录可能把 App 会话顶掉。稳妥做法是网页端用小号登录，然后在「待取包裹」里加大号的收件手机号并验证。
+- 没有 App 图标（装上白图标），要的话下次补。
+- 非官方工具，依赖官方网页，平台改版就失效。
+
+### 出包
+
+云编译流水线在 `.github/workflows/ios-unsigned.yml`（GitHub Actions `macos-15` / `macos-latest` 矩阵，XcodeGen + `CODE_SIGNING_ALLOWED=NO`）。推上 GitHub → Actions → 下 artifact → 全能签签名。
+
+> 本机（Windows）编不了 iOS：iOS 二进制要 Apple 的 iOS SDK 链接，本机 `clang`/`swift`/iOS SDK 全没有，WSL 也没装发行版。
+
+详细步骤和踩过的坑在 [ios/BUILD.md](ios/BUILD.md)。
 
 ---
 
