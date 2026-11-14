@@ -23,31 +23,42 @@
   'use strict';
 
   // ---------- 一、同源改路（必须在 document-start 完成） ----------
-  var FROM = 'https://api.pinduoduo.com/api/';
-  var TO = 'https://m.pinduoduo.net/proxy/api/api/';
+  var API_HOST = 'api.pinduoduo.com/api/';
+  var SAME_HOST = 'm.pinduoduo.net/proxy/api/api/';
 
-  // 登录页、验证页不做映射，避免干扰官方登录流程
-  var onAuthPage = /login|verify|captcha|passport/i.test(location.pathname + location.search);
-
-  function remap(u) {
-    if (onAuthPage) return u;
-    if (typeof u !== 'string') return u;
-    var i = u.indexOf(FROM);
-    if (i < 0) return u;
-    return TO + u.slice(i + FROM.length);
+  // 诊断用：改写过多少条、最近几条长什么样
+  if (!window.__pddMap) { window.__pddMap = { count: 0, log: [] }; }
+  function mapLog(kind, from, to) {
+    var L = window.__pddMap.log;
+    L.push(kind + ' ' + from + (to && to !== from ? '  ->  ' + to : '  (未改)'));
+    if (L.length > 30) { L.splice(0, L.length - 30); }
   }
 
-  // fetch
+  function remap(u) {
+    if (typeof u !== 'string') { return u; }
+    var i = u.indexOf(API_HOST);
+    if (i < 0) { return u; }
+    window.__pddMap.count++;
+    return u.slice(0, i) + SAME_HOST + u.slice(i + API_HOST.length);
+  }
+
+  // 注意：这里**不再**跳过登录页。
+  // 登录页自己也要发 POST https://api.pinduoduo.com/api/apoc/...pre/check，
+  // 那条同样因为跨站拿不到 Cookie 而 424 —— 登录验证永远过不去，
+  // 表现就是「输完验证码 / 密码，又弹回登录页」。所以全站一律改写。
   var origFetch = window.fetch;
   if (typeof origFetch === 'function') {
     window.fetch = function (input, init) {
       try {
         if (typeof input === 'string') {
-          input = remap(input);
+          var nu = remap(input);
+          mapLog('fetch', input, nu);
+          input = nu;
         } else if (input && typeof input === 'object' && typeof input.url === 'string') {
-          var nu = remap(input.url);
-          if (nu !== input.url && typeof Request === 'function') {
-            input = new Request(nu, input);
+          var nu2 = remap(input.url);
+          mapLog('fetch', input.url, nu2);
+          if (nu2 !== input.url && typeof Request === 'function') {
+            input = new Request(nu2, input);
           }
         }
       } catch (e) { /* 映射失败就走原请求 */ }
@@ -59,7 +70,11 @@
   var origOpen = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function () {
     var a = Array.prototype.slice.call(arguments);
-    if (a.length > 1) a[1] = remap(a[1]);
+    if (a.length > 1) {
+      var nu = remap(a[1]);
+      mapLog('xhr', String(a[1]), nu);
+      a[1] = nu;
+    }
     return origOpen.apply(this, a);
   };
 
@@ -68,6 +83,9 @@
     var origBeacon = navigator.sendBeacon.bind(navigator);
     navigator.sendBeacon = function (u, d) { return origBeacon(remap(u), d); };
   }
+
+  // 是否跑在自签 App 的壳里：壳里有自己的首页和按钮，页面里那个「简」就别出来抢位置
+  var IN_SHELL = !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.pickup);
 
   // ---------- 二、页面整理 ----------
   var HIDE_KEY = 'pddpickup.hidden.v1';
@@ -275,8 +293,10 @@
     document.head.appendChild(style);
 
     applyHidden();
-    makeButton();
-    bindPicker();
+    if (!IN_SHELL) {
+      makeButton();
+      bindPicker();
+    }
     bindBigCode();
 
     // SPA 会不停重绘，节流后再扫一遍

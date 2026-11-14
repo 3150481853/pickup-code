@@ -20,6 +20,22 @@
     var PLACE = /((?:货架|货位|取件位|位置|柜机|柜号|货架号)[:：]?\s*[A-Za-z0-9\-]{1,10}|[A-Z]?\d{1,2}\s*号?\s*(?:架|柜|排|层))/;
     var LOGIN_HINT = /(您需要登录才能继续访问|请登录|手机登录|扫码登录|验证码)/;
 
+    // 页面自己的 console.error 也存一份，诊断页能直接看到「为什么挂了」
+    var CONSOLE = [];
+    try {
+        ['error', 'warn'].forEach(function (k) {
+            var orig = console[k];
+            console[k] = function () {
+                try {
+                    var s = Array.prototype.map.call(arguments, function (a) { return String(a); }).join(' ');
+                    CONSOLE.push(k + ': ' + s.slice(0, 200));
+                    if (CONSOLE.length > 30) { CONSOLE.splice(0, CONSOLE.length - 30); }
+                } catch (e) { /* 忽略 */ }
+                return orig.apply(console, arguments);
+            };
+        });
+    } catch (e) { /* 忽略 */ }
+
     function norm(s) {
         return (s || '').replace(/[\s\u200b]+/g, ' ').trim();
     }
@@ -69,26 +85,37 @@
     }
 
     // ---- 通用启发式（淘宝/菜鸟，以及拼多多改版后的兜底）----
+    // 两遍扫：先给每个码找到「文本最短」的元素（最贴近码本身），
+    // 再从这个元素往上爬到卡片层，借它的文本拿驿站名和货架号。
     function collectGeneric() {
         var out = [];
         var seen = Object.create(null);
-        var nodes = document.querySelectorAll('div,li,section,article,dd,tr,a');
+        var nodes = document.querySelectorAll('div,li,section,article,dd,tr,a,span,p');
+        var best = Object.create(null);
         for (var i = 0; i < nodes.length; i++) {
             var el = nodes[i];
             var t = norm(el.innerText || el.textContent);
             if (!t || t.length < 6 || t.length > 200) { continue; }
             var m = t.match(CODE);
             if (!m) { continue; }
-            var p = el.parentElement;
-            if (p) {
-                var pt = norm(p.innerText || p.textContent);
-                if (pt && pt.length - t.length < 40 && CODE.test(pt)) { continue; }
-            }
-            var sm = t.match(STATION);
-            var pm = t.match(PLACE);
-            pushUnique(out, seen, m[0], sm ? sm[1] : '', pm ? norm(pm[1]) : '',
-                t.length > 90 ? t.slice(0, 90) : t);
+            var prev = best[m[0]];
+            if (!prev || t.length < prev.len) { best[m[0]] = { el: el, len: t.length }; }
         }
+        Object.keys(best).forEach(function (code) {
+            var el = best[code].el;
+            var ctx = norm(el.innerText || el.textContent);
+            var a = el.parentElement;
+            for (var hop = 0; a && hop < 5; hop++, a = a.parentElement) {
+                var at = norm(a.innerText || a.textContent);
+                if (!at || at.length > 120) { break; }
+                if ((at.match(CODE_G) || []).length > 1) { break; }  // 再往上就是列表了
+                ctx = at;
+            }
+            var sm = ctx.match(STATION);
+            var pm = ctx.match(PLACE);
+            pushUnique(out, seen, code, sm ? sm[1] : '', pm ? norm(pm[1]) : '',
+                ctx.length > 90 ? ctx.slice(0, 90) : ctx);
+        });
         return out;
     }
 
@@ -111,6 +138,33 @@
         var items = collect();
         post(items, stateOf(items));
         return items.length;
+    };
+
+    // 给「诊断」页用：一句话说清「这个页面现在到底卡在哪」
+    window.__pickupDiagnostics = function () {
+        var body = document.body ? norm(document.body.textContent) : '';
+        var frames = [];
+        var fs = document.querySelectorAll('iframe');
+        for (var i = 0; i < fs.length && i < 6; i++) {
+            frames.push(String(fs[i].src || '(无 src)').slice(0, 110));
+        }
+        var o = {
+            site: SITE,
+            url: location.href.slice(0, 200),
+            title: document.title,
+            ready: document.readyState,
+            bodyLen: body.length,
+            head: body.slice(0, 160),
+            loginish: LOGIN_HINT.test(body),
+            pddCards: document.querySelectorAll('[class*="package-list-picking"]').length,
+            noneBox: !!document.querySelector('[class*="package-none-container"]'),
+            frames: frames,
+            items: collect(),
+            map: window.__pddMap || null,
+            console: CONSOLE,
+            ua: (navigator.userAgent || '').slice(0, 120)
+        };
+        return JSON.stringify(o);
     };
 
     var timer = 0;

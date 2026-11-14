@@ -34,6 +34,13 @@ jobs:
       - name: 安装 XcodeGen
         run: brew install xcodegen
 
+      - name: 读取版本号
+        id: ver
+        run: |
+          V=$(grep -o 'MARKETING_VERSION: "[0-9.]*"' ios/project.yml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          echo "v=${V:-0.0.0}" >> "$GITHUB_OUTPUT"
+          echo "版本号 = ${V:-0.0.0}"
+
       - name: 生成 Xcode 工程
         working-directory: ios
         run: xcodegen generate
@@ -57,18 +64,19 @@ jobs:
         if: success()
         run: |
           set -e
+          V='${{ steps.ver.outputs.v }}'
           rm -rf out && mkdir -p out/Payload
           cp -R ios/build/Build/Products/Release-iphoneos/PickupCode.app out/Payload/
           cd out
-          zip -qry PickupCode-unsigned.ipa Payload
-          ls -lh PickupCode-unsigned.ipa
+          zip -qry "PickupCode-${V}-unsigned.ipa" Payload
+          ls -lh "PickupCode-${V}-unsigned.ipa"
           echo "--- 结构 ---"
-          unzip -l PickupCode-unsigned.ipa | head -30
+          unzip -l "PickupCode-${V}-unsigned.ipa" | head -30
 
       - name: 上传产物
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: PickupCode-unsigned-ipa-${{ matrix.os }}
-          path: out/PickupCode-unsigned.ipa
+          name: PickupCode-${{ steps.ver.outputs.v }}-unsigned-ipa-${{ matrix.os }}
+          path: out/PickupCode-${{ steps.ver.outputs.v }}-unsigned.ipa
           if-no-files-found: error

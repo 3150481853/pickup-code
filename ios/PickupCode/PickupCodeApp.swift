@@ -7,6 +7,7 @@ import UIKit
 final class AppModel: ObservableObject {
     let store = PickupStore()
     let boxes: [WebBox]
+    @Published var diag: [(String, String)] = []
     private var timer: Timer?
 
     init() {
@@ -32,6 +33,22 @@ final class AppModel: ObservableObject {
             self?.collectAll()
         }
     }
+
+    // 把三个页面此刻的状态全拉回来，给「诊断」页看
+    func diagnoseAll() {
+        diag = []
+        var acc: [(String, String)] = []
+        let expected = boxes.count
+        for b in boxes {
+            let note = b.isOpened ? "" : "[这个标签还没打开过]\n"
+            b.diagnose { text in
+                acc.append((b.spec.tabTitle, note + text))
+                if acc.count == expected {
+                    self.diag = acc.sorted { $0.0 < $1.0 }
+                }
+            }
+        }
+    }
 }
 
 // MARK: - 根视图
@@ -39,6 +56,7 @@ final class AppModel: ObservableObject {
 struct ContentView: View {
     @StateObject private var model = AppModel()
     @State private var selected = 0     // 0 = 首页，1..3 = 三个站点
+    @State private var showDiag = false
 
     private var titles: [String] { ["首页"] + Sites.all.map { $0.tabTitle } }
 
@@ -52,10 +70,18 @@ struct ContentView: View {
                 }
 
                 if selected == 0 {
-                    HomeView(store: model.store, onRefresh: model.refreshAll)
+                    HomeView(store: model.store,
+                             onRefresh: model.refreshAll,
+                             onDiagnose: {
+                                 model.diagnoseAll()
+                                 showDiag = true
+                             })
                         .background(Color(UIColor.systemGroupedBackground))
                 } else {
                     HStack(spacing: 6) {
+                        if model.boxes[selected - 1].canLogin {
+                            chrome("整页登录") { model.boxes[selected - 1].login() }
+                        }
                         chrome("刷新") { model.boxes[selected - 1].reload() }
                         chrome("入口") { model.boxes[selected - 1].backToEntry() }
                     }
@@ -68,6 +94,9 @@ struct ContentView: View {
             tabBar
         }
         .onAppear { model.startAll() }
+        .sheet(isPresented: $showDiag) {
+            DiagView(model: model, isPresented: $showDiag)
+        }
     }
 
     private func chrome(_ title: String, _ action: @escaping () -> Void) -> some View {
@@ -122,6 +151,7 @@ struct ContentView: View {
 struct HomeView: View {
     @ObservedObject var store: PickupStore
     var onRefresh: () -> Void
+    var onDiagnose: () -> Void
 
     private var subtitle: String {
         if store.items.isEmpty { return "还没有数据" }
@@ -145,6 +175,18 @@ struct HomeView: View {
                         .foregroundColor(.secondary)
                 }
                 Spacer()
+                Text("v" + (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"))
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary.opacity(0.7))
+                Button(action: onDiagnose) {
+                    Text("诊断")
+                        .font(.system(size: 12, weight: .medium))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.black.opacity(0.05))
+                        .clipShape(Capsule())
+                }
+                .foregroundColor(.secondary)
                 Button(action: onRefresh) {
                     Text("刷新全部")
                         .font(.system(size: 13, weight: .medium))
@@ -256,6 +298,55 @@ struct HomeView: View {
         if !item.place.isEmpty { parts.append(item.place) }
         if parts.isEmpty { parts.append(item.raw) }
         return parts.joined(separator: " · ")
+    }
+}
+
+// MARK: - 诊断页
+
+struct DiagView: View {
+    @ObservedObject var model: AppModel
+    @Binding var isPresented: Bool
+
+    private var allText: String {
+        model.diag.map { "### \($0.0)\n\($0.1)" }.joined(separator: "\n\n")
+    }
+
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    if model.diag.isEmpty {
+                        Text("正在读取…（如果一直空着，说明 WebView 还没加载出页面）")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                    }
+                    ForEach(model.diag.indices, id: \.self) { i in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(model.diag[i].0)
+                                .font(.system(size: 13, weight: .semibold))
+                            Text(model.diag[i].1)
+                                .font(.system(size: 10, design: .monospaced))
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .padding(14)
+            }
+            .navigationTitle("诊断")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("全部复制") {
+                        UIPasteboard.general.string = allText
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("关闭") { isPresented = false }
+                }
+            }
+        }
     }
 }
 
