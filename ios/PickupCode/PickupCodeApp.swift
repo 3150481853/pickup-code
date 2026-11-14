@@ -8,7 +8,9 @@ final class AppModel: ObservableObject {
     let store = PickupStore()
     let boxes: [WebBox]
     @Published var diag: [(String, String)] = []
+    @Published private(set) var mtopNote: String = ""
     private var timer: Timer?
+    private var cainiaoTimer: Timer?
 
     init() {
         boxes = Sites.all.map { WebBox(spec: $0) }
@@ -17,9 +19,30 @@ final class AppModel: ObservableObject {
 
     func startAll() {
         for b in boxes { b.openIfNeeded() }
+        queryCainiao()
         guard timer == nil else { return }
         timer = Timer.scheduledTimer(withTimeInterval: 25, repeats: true) { [weak self] _ in
             self?.collectAll()
+        }
+        cainiaoTimer = Timer.scheduledTimer(withTimeInterval: 45, repeats: true) { [weak self] _ in
+            self?.queryCainiao()
+        }
+    }
+
+    // 菜鸟「取包裹」列表走原生 mtop：网页里 JS 在 page.cainiao.com 下读不到 .taobao.com 的
+    // `_m_h5_tk`（签名 token），所以接口永远 SESSION_EXPIRED。原生能拿到全部 cookie。
+    func queryCainiao() {
+        Cainiao.query { [weak self] reply, items in
+            guard let self = self else { return }
+            var note = "菜鸟接口：" + reply.ret
+            if reply.ok {
+                note += " · " + String(items.count) + " 件"
+                self.store.ingestNative(site: "cainiao", items: items,
+                                        state: "抓到 " + String(items.count) + " 件")
+            } else if !reply.raw.isEmpty {
+                note += "\n  " + String(reply.raw.prefix(400))
+            }
+            self.mtopNote = note
         }
     }
 
@@ -29,6 +52,7 @@ final class AppModel: ObservableObject {
 
     func refreshAll() {
         for b in boxes { b.reload() }
+        queryCainiao()
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
             self?.collectAll()
         }
@@ -47,6 +71,17 @@ final class AppModel: ObservableObject {
                     self.diag = acc.sorted { $0.0 < $1.0 }
                 }
             }
+        }
+        // 原生 mtop 这一路也记一笔：界面里网页永远显示 SESSION_EXPIRED，
+        // 真正能判断「登录态到底有没有效」的是这一条。
+        Cainiao.query { [weak self] reply, items in
+            guard let self = self else { return }
+            var t = "ret: " + reply.ret + "\n原生抓到 " + String(items.count) + " 件"
+            if !items.isEmpty {
+                t += "\n" + items.prefix(5).map { $0.code + " " + $0.station + " " + $0.place }.joined(separator: "\n")
+            }
+            if !reply.ok { t += "\nraw: " + String(reply.raw.prefix(800)) }
+            self.diag.append(("菜鸟接口", t))
         }
     }
 }

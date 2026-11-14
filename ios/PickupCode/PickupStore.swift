@@ -76,6 +76,13 @@ final class PickupStore: ObservableObject {
         republish()
     }
 
+    // 原生接口（菜鸟 mtop）整批灌进来
+    func ingestNative(site: String, items: [PickupItem], state: String? = nil) {
+        if let s = state, !s.isEmpty { siteState[site] = s }
+        lastPayload[site] = items
+        republish()
+    }
+
     // MARK: - 手动 / 识别录入
 
     /// 规范化取件码：全角破折号→半角、去空格、去首尾杂字
