@@ -182,21 +182,32 @@ final class WebBox: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessag
             }
             // 只列前 14 个 cookie 名会骗人（总数 85 条，真正决定登录态的那几个可能排在第 40 位），
             // 所以改成：按域名统计 + 明确点名检查会话 cookie 在不在。
+            // 注意：这里刻意拆成很多小表达式 —— 串成一条长 string 拼接会让 Swift 类型检查超时（实测踩过）。
             var byDomain: [String: Int] = [:]
             for c in mine { byDomain[c.domain.lowercased(), default: 0] += 1 }
-            let doms = byDomain.sorted { $0.value > $1.value }.prefix(10)
-                .map { "\($0.key)=\($0.value)" }.joined(separator: "  ")
-            let keys = ["cookie2", "_tb_token_", "unb", "_l_g_", "sgcookie", "lgc", "tracknick", "_m_h5_tk", "cna"]
+            let sortedDomains = byDomain.sorted { $0.value > $1.value }
+            var domParts: [String] = []
+            for pair in sortedDomains.prefix(10) {
+                domParts.append(pair.key + "=" + String(pair.value))
+            }
+            let doms: String = domParts.joined(separator: "  ")
+            let keys: [String] = ["cookie2", "_tb_token_", "unb", "_l_g_", "sgcookie", "lgc", "tracknick", "_m_h5_tk", "cna"]
             var have: [String] = []
             var miss: [String] = []
             for k in keys {
                 if mine.contains(where: { $0.name == k }) { have.append(k) } else { miss.append(k) }
             }
-            let extra = "cookies 总数 " + String(cookies.count) + "，相关 " + String(mine.count)
-                + "\n  按域名：" + (doms.isEmpty ? "（无）" : doms)
-                + "\n  会话 cookie 有：" + (have.isEmpty ? "（无）" : have.joined(separator: ","))
-                + "\n  缺少：" + (miss.isEmpty ? "（无）" : miss.joined(separator: ","))
-                + "\nnav(" + String(self.navLog.count) + "): " + self.navLog.suffix(8).joined(separator: " ← ")
+            let haveText: String = have.isEmpty ? "（无）" : have.joined(separator: ",")
+            let missText: String = miss.isEmpty ? "（无）" : miss.joined(separator: ",")
+            let domText: String = doms.isEmpty ? "（无）" : doms
+            let navText: String = self.navLog.suffix(8).joined(separator: " ← ")
+            var parts: [String] = []
+            parts.append("cookies 总数 " + String(cookies.count) + "，相关 " + String(mine.count))
+            parts.append("  按域名：" + domText)
+            parts.append("  会话 cookie 有：" + haveText)
+            parts.append("  缺少：" + missText)
+            parts.append("nav(" + String(self.navLog.count) + "): " + navText)
+            let extra: String = parts.joined(separator: "\n")
             DispatchQueue.main.async {
                 self.diagnoseJS(extra: extra, completion: completion)
             }
