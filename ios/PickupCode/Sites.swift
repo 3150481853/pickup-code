@@ -52,7 +52,7 @@ enum Sites {
                  scriptName: "inject-taobao",
                  loginURL: taobaoLogin(to: cainiaoTakeEntry),
                  autoReturnAfterLogin: true,
-                 hint: "要点「整页登录」登一次淘宝；登录后这里就是菜鸟「取包裹」原文列表")
+                 hint: "要点「整页登录」登一次淘宝；登录后这里就是菜鸟「取包裹」原文列表"),
 
         SiteSpec(id: "pdd",
                  tabTitle: "拼多多",
@@ -75,9 +75,6 @@ enum Sites {
                  loginURL: taobaoLogin(to: taobaoEntry),
                  autoReturnAfterLogin: true,
                  hint: "登录在淘宝自己的域里完成，最不容易被回环卡住"),
-
-        // 菜鸟「取包裹」：菜鸟 App 那个「取包裹·共N件」列表的网页版。
-        // 需要淘宝登录（同一套 SessionID），所以登录走淘宝整页登录。
     ]
 
     // WKWebView 默认 UA 结尾是 "Mobile/15E148"，**没有 "Safari/604.1" 这一段**。
