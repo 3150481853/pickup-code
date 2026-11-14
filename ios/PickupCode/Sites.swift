@@ -29,10 +29,12 @@ enum Sites {
                  allowedHosts: ["pinduoduo.net", "pinduoduo.com", "yangkeduo.com"],
                  scriptName: "inject-pdd"),
 
-        // 淘宝：官方「驿站代收」身份码页，身份码 + 待取包裹（菜鸟那一侧的取件码在这里）
+        // 淘宝：官方「学校/驿站」tab，里面才是待取件**列表**。
+        // 注意 end-collect-platform/identity-code 那一页只有身份码、没有包裹列表，
+        // 所以聚合用的入口用这个（HandyCode 也是拿它当「待取包裹」入口）。
         SiteSpec(id: "taobao",
                  tabTitle: "淘宝取件",
-                 entry: URL(string: "https://pages-fast.m.taobao.com/wow/z/uniapp/1011717/last-mile-fe/end-collect-platform/identity-code")!,
+                 entry: URL(string: "https://pages-fast.m.taobao.com/wow/z/uniapp/1100333/last-mile-fe/m-end-school-tab/home")!,
                  allowedHosts: ["taobao.com", "tmall.com", "alipay.com", "cainiao.com", "alibaba.com"],
                  scriptName: "inject-taobao"),
 
@@ -47,9 +49,10 @@ enum Sites {
 
 // MARK: - 每个标签一个常驻 WebView
 
-final class WebBox: NSObject, WKNavigationDelegate {
+final class WebBox: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
     let spec: SiteSpec
     let webView: WKWebView
+    weak var store: PickupStore?
     private var opened = false
 
     init(spec: SiteSpec) {
@@ -65,12 +68,22 @@ final class WebBox: NSObject, WKNavigationDelegate {
                              forMainFrameOnly: false)
             )
         }
+        // 聚合抓取 + 壳内修补，所有站点共用一份
+        if let agent = WebBox.loadScript("pickup-agent") {
+            cfg.userContentController.addUserScript(
+                WKUserScript(source: agent,
+                             injectionTime: .atDocumentStart,
+                             forMainFrameOnly: false)
+            )
+        }
         let wv = WKWebView(frame: .zero, configuration: cfg)
         wv.allowsBackForwardNavigationGestures = true
         wv.scrollView.contentInsetAdjustmentBehavior = .never
         self.webView = wv
         super.init()
         wv.navigationDelegate = self
+        wv.uiDelegate = self
+        wv.configuration.userContentController.add(self, name: "pickup")
     }
 
     static func loadScript(_ name: String) -> String? {
@@ -89,6 +102,22 @@ final class WebBox: NSObject, WKNavigationDelegate {
 
     func backToEntry() { webView.load(URLRequest(url: spec.entry)) }
 
+    // 让页面里的脚本把「待取件」推给原生
+    func collect() {
+        webView.evaluateJavaScript("window.__pickupCollect && window.__pickupCollect()",
+                                   completionHandler: nil)
+    }
+
+    var isOpened: Bool { opened }
+
+    // MARK: WKScriptMessageHandler
+
+    func userContentController(_ userContentController: WKUserContentController,
+                               didReceive message: WKScriptMessage) {
+        guard message.name == "pickup" else { return }
+        store?.ingest(message.body)
+    }
+
     // MARK: WKNavigationDelegate
 
     func webView(_ webView: WKWebView,
@@ -104,18 +133,35 @@ final class WebBox: NSObject, WKNavigationDelegate {
             decisionHandler(.allow)
             return
         }
-        if spec.allows(url) && (scheme == "https" || scheme == "http") {
+        if (scheme == "https" || scheme == "http") && spec.allows(url) {
             decisionHandler(.allow)
             return
         }
-        if scheme == "http" || scheme == "https" {
-            // 站外链接（用户协议、帮助页）交给 Safari，别把主 WebView 带跑
+        if scheme == "https" || scheme == "http" {
+            // 站外 https 交给 Safari（用户协议、帮助页）
             UIApplication.shared.open(url)
             decisionHandler(.cancel)
             return
         }
-        // pinduoduo:// taobao:// 之类交给系统
-        UIApplication.shared.open(url)
+        // pinduoduo:// taobao:// alipays:// 之类一律不跳转：
+        // 拼多多登录页会主动往 App 里扔，跳过去就再也回不来网页登录了。
         decisionHandler(.cancel)
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        collect()
+    }
+
+    // MARK: WKUIDelegate —— target=_blank / window.open 在当前 WebView 里打开
+
+    func webView(_ webView: WKWebView,
+                 createWebViewWith configuration: WKWebViewConfiguration,
+                 for navigationAction: WKNavigationAction,
+                 windowFeatures: WKWindowFeatures) -> WKWebView? {
+        if let url = navigationAction.request.url, spec.allows(url) {
+            webView.load(navigationAction.request)
+        }
+        // 返回 nil：不要新窗口，就地加载。淘宝的验证码页靠这个才走得下去。
+        return nil
     }
 }
