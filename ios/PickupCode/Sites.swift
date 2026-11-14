@@ -178,14 +178,11 @@ final class WebBox: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessag
             decisionHandler(.allow)
             return
         }
-        if (scheme == "https" || scheme == "http") && spec.allows(url) {
-            decisionHandler(.allow)
-            return
-        }
+        // 所有 http(s) 一律留在壳里开。之前把「站外 https」交给 Safari，
+        // 结果一进登录流程（login.taobao.com、passport、支付宝授权页）就被踢去浏览器，
+        // 那个浏览器里没有壳的登录态，等于死路。宁可多跑几张页，也不要把人踢出去。
         if scheme == "https" || scheme == "http" {
-            // 站外 https 交给 Safari（用户协议、帮助页）
-            UIApplication.shared.open(url)
-            decisionHandler(.cancel)
+            decisionHandler(.allow)
             return
         }
         // pinduoduo:// taobao:// alipays:// 之类一律不跳转：
@@ -214,8 +211,11 @@ final class WebBox: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessag
                  createWebViewWith configuration: WKWebViewConfiguration,
                  for navigationAction: WKNavigationAction,
                  windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if let url = navigationAction.request.url, spec.allows(url) {
-            webView.load(navigationAction.request)
+        if let url = navigationAction.request.url {
+            let s = (url.scheme ?? "").lowercased()
+            if s == "http" || s == "https" || s == "about" || s == "data" || s == "blob" {
+                webView.load(navigationAction.request)
+            }
         }
         // 返回 nil：不要新窗口，就地加载。淘宝的验证码页靠这个才走得下去。
         return nil

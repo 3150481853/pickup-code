@@ -14,8 +14,10 @@
     var HOST = location.hostname || '';
     var SITE = HOST.indexOf('pinduoduo') >= 0 || HOST.indexOf('yangkeduo') >= 0 ? 'pdd' : 'taobao';
 
-    var CODE = /\b\d{1,3}-\d{1,2}-\d{3,6}\b/;
-    var CODE_G = /\b\d{1,3}-\d{1,2}-\d{3,6}\b/g;
+    // 取件码：三段的数字，中间可能用半角/全角横线，也可能带空格。
+    // 拼多多不同快递公司渲染出来的破折号不一定是 ASCII 的 -，只认半角会漏件。
+    var CODE = /\b\d{1,3}\s*[-－—–−]\s*\d{1,2}\s*[-－—–−]\s*\d{3,6}\b/;
+    var CODE_G = /\b\d{1,3}\s*[-－—–−]\s*\d{1,2}\s*[-－—–−]\s*\d{3,6}\b/g;
     var STATION = /([\u4e00-\u9fa5A-Za-z0-9（）()·]{2,20}?(?:驿站|服务站|自提点|快递柜|快递中心|代收点|门店|超市|便利店))/;
     var PLACE = /((?:货架|货位|取件位|位置|柜机|柜号|货架号)[:：]?\s*[A-Za-z0-9\-]{1,10}|[A-Z]?\d{1,2}\s*号?\s*(?:架|柜|排|层))/;
     var LOGIN_HINT = /(您需要登录才能继续访问|请登录|手机登录|扫码登录|验证码)/;
@@ -51,7 +53,9 @@
     }
 
     function pushUnique(out, seen, code, station, place, raw) {
-        if (!code || seen[code]) { return; }
+        if (!code) { return; }
+        code = String(code).replace(/[－—–−]/g, '-').replace(/\s+/g, '');
+        if (seen[code]) { return; }
         seen[code] = true;
         out.push({
             code: code,
@@ -120,8 +124,27 @@
     }
 
     function collect() {
-        var items = SITE === 'pdd' ? collectPdd() : [];
-        if (!items.length) { items = collectGeneric(); }
+        // 两条路都跑，按取件码合并：
+        // 拼多多的卡片有时只有第一张带官方类名（换快递公司就换一套 DOM），
+        // 只靠官方结构会漏件；只靠通用启发式又容易把驿站电话之类当成码。
+        var items = collectPdd();
+        var seen = Object.create(null);
+        for (var i = 0; i < items.length; i++) { seen[items[i].code] = true; }
+        var gen = collectGeneric();
+        for (var j = 0; j < gen.length; j++) {
+            var g = gen[j];
+            if (!seen[g.code]) {
+                seen[g.code] = true;
+                items.push(g);
+            } else {
+                // 通用启发式给的驿站/货位常常更全，补空格
+                for (var k = 0; k < items.length; k++) {
+                    if (items[k].code !== g.code) { continue; }
+                    if (!items[k].station && g.station) { items[k].station = g.station; }
+                    if (!items[k].place && g.place) { items[k].place = g.place; }
+                }
+            }
+        }
         return items;
     }
 
