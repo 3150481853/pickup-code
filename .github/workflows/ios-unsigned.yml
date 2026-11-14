@@ -8,11 +8,25 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14
-    timeout-minutes: 25
+    name: build (${{ matrix.os }})
+    # macos-14 在这台账号上被解析成 macos-14-arm64-us-default（不支持），
+    # 所以一轮里同时试几个镜像，哪个能起跑哪个就出 ipa，失败的不影响其它。
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-13, macos-15, macos-latest]
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: 环境信息
+        run: |
+          sw_vers
+          xcodebuild -version
+          uname -m
 
       - name: 安装 XcodeGen
         run: brew install xcodegen
@@ -24,6 +38,7 @@ jobs:
       - name: 编译（不签名）
         working-directory: ios
         run: |
+          set -o pipefail
           xcodebuild \
             -project PickupCode.xcodeproj \
             -scheme PickupCode \
@@ -33,9 +48,10 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            build
+            build 2>&1 | tee build.log | tail -80
 
       - name: 打包成 ipa
+        if: success()
         run: |
           set -e
           rm -rf out && mkdir -p out/Payload
@@ -47,8 +63,9 @@ jobs:
           unzip -l PickupCode-unsigned.ipa | head -30
 
       - name: 上传产物
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: PickupCode-unsigned-ipa
+          name: PickupCode-unsigned-ipa-${{ matrix.os }}
           path: out/PickupCode-unsigned.ipa
           if-no-files-found: error
