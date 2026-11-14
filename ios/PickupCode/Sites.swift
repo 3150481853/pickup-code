@@ -11,6 +11,11 @@ struct SiteSpec: Identifiable {
     let allowedHosts: [String] // 允许在主 WebView 里开的域名（后缀匹配）
     let scriptName: String?   // 注入脚本文件名（不带 .js）
     let loginURL: URL?        // 「整页登录」用的地址（nil = 该站自带登录，不需要）
+    // 登录成功后再自动回入口一次。
+    // Android 侧的 HandyCode 也这么干：登录跳回来那一刻 Cookie 还没完全生效，
+    // 不补这一次 reload，页面会立刻又判定「未登录」弹回登录页。
+    let autoReturnAfterLogin: Bool
+    let hint: String?         // 这个标签顶上常驻的一句提示
 
     func allows(_ url: URL?) -> Bool {
         guard let url = url, let host = url.host?.lowercased() else { return false }
@@ -43,7 +48,9 @@ enum Sites {
                  entry: pddEntry,
                  allowedHosts: ["pinduoduo.net", "pinduoduo.com", "yangkeduo.com"],
                  scriptName: "inject-pdd",
-                 loginURL: nil),
+                 loginURL: nil,
+                 autoReturnAfterLogin: false,
+                 hint: nil),
 
         // 淘宝：官方「学校/驿站」tab，里面才是待取件**列表**。
         // 注意 end-collect-platform/identity-code 那一页只有身份码、没有包裹列表，
@@ -53,7 +60,9 @@ enum Sites {
                  entry: taobaoEntry,
                  allowedHosts: ["taobao.com", "tmall.com", "alipay.com", "cainiao.com", "alibaba.com"],
                  scriptName: "inject-taobao",
-                 loginURL: taobaoLogin(to: taobaoEntry)),
+                 loginURL: taobaoLogin(to: taobaoEntry),
+                 autoReturnAfterLogin: true,
+                 hint: "登录在淘宝自己的域里完成，最不容易被回环卡住"),
 
         // 菜鸟：官方身份码页，登录态与淘宝共用
         SiteSpec(id: "cainiao",
@@ -61,7 +70,9 @@ enum Sites {
                  entry: cainiaoEntry,
                  allowedHosts: ["cainiao.com", "taobao.com", "tmall.com", "alipay.com", "alibaba.com"],
                  scriptName: "inject-taobao",
-                 loginURL: taobaoLogin(to: cainiaoEntry))
+                 loginURL: taobaoLogin(to: cainiaoEntry),
+                 autoReturnAfterLogin: true,
+                 hint: "菜鸟借淘宝登录态：先在「淘宝取件」登一次，再回来点刷新")
     ]
 }
 
@@ -73,6 +84,9 @@ final class WebBox: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessag
     weak var store: PickupStore?
     private var opened = false
     private(set) var lastError: String?
+    private var navLog: [String] = []          // 主框架导航记录（诊断用）
+    private var sawLogin = false
+    private var autoReturned = false
 
     init(spec: SiteSpec) {
         self.spec = spec
@@ -119,12 +133,17 @@ final class WebBox: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessag
 
     func reload() { webView.reload() }
 
-    func backToEntry() { webView.load(URLRequest(url: spec.entry)) }
+    func backToEntry() {
+        autoReturned = false
+        webView.load(URLRequest(url: spec.entry))
+    }
 
     // 整页登录：不走页面内那个跨域 iframe，直接在当前 WebView 里打开登录页，
     // 登录完由淘宝自己 redirectURL 跳回入口。iOS 的第三方 Cookie 限制就是这么绕开的。
     func login() {
         guard let u = spec.loginURL else { return }
+        sawLogin = false
+        autoReturned = false
         webView.load(URLRequest(url: u))
     }
 
@@ -136,10 +155,28 @@ final class WebBox: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessag
                                    completionHandler: nil)
     }
 
-    // 诊断：把这个页面此刻的状态、抓到的件、请求改写次数拉回来
+    // 诊断：页面此刻的状态、抓到的件、请求改写次数、Cookie 数量、导航链
     func diagnose(completion: @escaping (String) -> Void) {
+        let cookieStore = webView.configuration.websiteDataStore.httpCookieStore
+        cookieStore.getAllCookies { cookies in
+            let mine = cookies.filter { c in
+                let d = c.domain.lowercased()
+                return d.contains("taobao") || d.contains("cainiao") || d.contains("alipay")
+                    || d.contains("pinduoduo") || d.contains("yangkeduo")
+            }
+            let names = mine.prefix(14).map { "\($0.domain)/\($0.name)" }.joined(separator: ", ")
+            let extra = "cookies 总数 " + String(cookies.count) + "，本站相关 " + String(mine.count)
+                + (names.isEmpty ? "" : "\n  " + names)
+                + "\nnav(" + String(self.navLog.count) + "): " + self.navLog.suffix(8).joined(separator: " ← ")
+            DispatchQueue.main.async {
+                self.diagnoseJS(extra: extra, completion: completion)
+            }
+        }
+    }
+
+    private func diagnoseJS(extra: String, completion: @escaping (String) -> Void) {
         let js = "(function(){try{return (window.__pickupDiagnostics && window.__pickupDiagnostics()) || 'no agent';}catch(e){return 'JS ERROR: '+e;}})()"
-        let prefix = lastError.map { "⚠️ \($0)\n" } ?? ""
+        let prefix = (lastError.map { "⚠️ \($0)\n" } ?? "") + extra + "\n"
         webView.evaluateJavaScript(js) { result, error in
             DispatchQueue.main.async {
                 if let e = error {
@@ -151,6 +188,20 @@ final class WebBox: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessag
                 }
             }
         }
+    }
+
+    private func noteNav(_ url: URL) {
+        var s = url.absoluteString
+        if s.count > 150 { s = String(s.prefix(150)) + "…" }
+        navLog.append(s)
+        if navLog.count > 40 { navLog.removeFirst(navLog.count - 40) }
+    }
+
+    private static func isLoginURL(_ url: URL) -> Bool {
+        let s = ((url.host ?? "") + url.path + (url.query ?? "")).lowercased()
+        if s.contains("/login") || s.contains("login.") || s.contains("passport") { return true }
+        if s.contains("signin") || s.contains("/member/login") { return true }
+        return false
     }
 
     var isOpened: Bool { opened }
@@ -192,6 +243,25 @@ final class WebBox: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessag
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         lastError = nil
+        let url = webView.url
+        if let u = url {
+            noteNav(u)
+            if spec.autoReturnAfterLogin {
+                if WebBox.isLoginURL(u) {
+                    sawLogin = true
+                } else if sawLogin && !autoReturned {
+                    // 登录成功跳回来的一瞬间，Cookie 可能还没落到 WKWebsiteDataStore，
+                    // 页面脚本这会儿判「未登录」就会立刻再弹回登录页。补一次 reload，
+                    // 只补一次，避免和真的登录失败无限循环。
+                    autoReturned = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+                        guard let self = self else { return }
+                        self.navLog.append("↻ 登录后自动回入口（一次性）")
+                        self.webView.load(URLRequest(url: self.spec.entry))
+                    }
+                }
+            }
+        }
         collect()
     }
 

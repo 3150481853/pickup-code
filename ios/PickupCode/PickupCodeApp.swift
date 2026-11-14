@@ -91,6 +91,15 @@ struct ContentView: View {
                 }
             }
 
+            if selected > 0, let hint = model.boxes[selected - 1].spec.hint {
+                Text(hint)
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 4)
+                    .background(Color(UIColor.secondarySystemBackground))
+            }
+
             tabBar
         }
         .onAppear { model.startAll() }
