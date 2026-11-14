@@ -78,9 +78,11 @@ final class AppModel: ObservableObject {
             guard let self = self else { return }
             var t = "ret: " + reply.ret + "\n原生抓到 " + String(items.count) + " 件"
             if !items.isEmpty {
-                t += "\n" + items.prefix(5).map { $0.code + " " + $0.station + " " + $0.place }.joined(separator: "\n")
+                t += "\n" + items.prefix(12).map { $0.code + " ｜ " + $0.station + " ｜ " + $0.place }.joined(separator: "\n")
             }
-            if !reply.ok { t += "\nraw: " + String(reply.raw.prefix(800)) }
+            // 成功也带上 raw 样本：返回结构没有文档，只能靠真数据对齐字段名
+            // （0.9.0 就是因为没看过 raw，把「校园快递服务中心」当成驿站名了）。
+            if !reply.raw.isEmpty { t += "\nraw: " + String(reply.raw.prefix(2000)) }
             self.diag.append(("菜鸟接口", t))
         }
     }

@@ -24,12 +24,28 @@ enum Cainiao {
             return PickupStore.looksLikeCode(t)
         }
 
-        static func isStation(_ s: String) -> Bool {
-            guard s.count >= 2, s.count <= 30 else { return false }
-            let keys = ["驿站", "快递", "超市", "服务中心", "自提点", "便利店", "菜鸟", "门卫", "收发室", "柜"]
+        // 地址比驿站名长得多、还带省市区镇：一律不算驿站名。
+        static func looksLikeAddress(_ s: String) -> Bool {
+            let keys = ["省", "市", "区", "县", "镇", "街道", "路", "号", "栋", "楼", "室", "村"]
             for k in keys where s.contains(k) { return true }
             return false
         }
+
+        // 0.9.0 的坑：只挑「第一个含快递/服务中心的字符串」，结果把「校园快递服务中心」
+        // 甚至「广东省广州市…校园快递服务中心」当成驿站名，而真正该显示的是「广软多多驿站」。
+        // 改成打分：含「驿站」最高，其次自提点/服务站/快递柜/超市，最后才是「服务中心」。
+        static func stationScore(_ s: String) -> Int {
+            guard s.count >= 2, s.count <= 24 else { return 0 }
+            if looksLikeAddress(s) { return 0 }
+            var score = 0
+            if s.contains("驿站") { score += 5 }
+            let mid = ["服务站", "自提点", "快递柜", "超市", "便利店", "门卫", "收发室", "菜鸟"]
+            for k in mid where s.contains(k) { score += 3 }
+            if s.contains("服务中心") { score += 1 }
+            return score
+        }
+
+        static func isStation(_ s: String) -> Bool { stationScore(s) > 0 }
 
         static func isPlace(_ s: String) -> Bool {
             guard !s.isEmpty, s.count <= 24 else { return false }
@@ -57,10 +73,12 @@ enum Cainiao {
                     if !seen.contains(code) {
                         seen.insert(code)
                         var station = ""
+                        var bestScore = 0
                         var place = ""
                         for v in vals {
                             if isCode(v) { continue }
-                            if station.isEmpty && isStation(v) { station = v }
+                            let sc = stationScore(v)
+                            if sc > bestScore { bestScore = sc; station = v }
                             if place.isEmpty && isPlace(v) { place = v }
                         }
                         let rest = vals.filter { !isCode($0) && $0 != station && $0 != place }
