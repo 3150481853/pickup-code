@@ -305,6 +305,12 @@ struct HomeView: View {
     var onDiagnose: () -> Void
 
     @State private var showAdd = false
+    @State private var showShare = false
+    @State private var openCode: String? = nil      // 当前向左划开的那一行
+    @State private var dragCode: String? = nil      // 正在拖动的那一行
+    @State private var dragX: CGFloat = 0
+
+    private let actionWidth: CGFloat = 170          // 划开后露出的两个按钮总宽
 
     private var subtitle: String {
         if store.items.isEmpty { return "还没有数据" }
@@ -349,6 +355,15 @@ struct HomeView: View {
                         .clipShape(Capsule())
                 }
                 .foregroundColor(.secondary)
+                Button(action: { showShare = true }) {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 14, weight: .medium))
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 6)
+                        .background(Color.black.opacity(0.05))
+                        .clipShape(Capsule())
+                }
+                .foregroundColor(.secondary)
                 Button(action: onRefresh) {
                     Text("刷新全部")
                         .font(.system(size: 13, weight: .medium))
@@ -385,6 +400,9 @@ struct HomeView: View {
         }
         .sheet(isPresented: $showAdd) {
             AddItemView(store: store)
+        }
+        .sheet(isPresented: $showShare) {
+            SharePickerView(store: store)
         }
     }
 
@@ -445,7 +463,68 @@ struct HomeView: View {
         .padding(.horizontal, 34)
     }
 
+    /// 一行待取件：向左划出「置顶 / 删除」两个按钮
     private func row(_ item: PickupItem) -> some View {
+        let base: CGFloat = (openCode == item.code) ? -actionWidth : 0
+        let live: CGFloat = (dragCode == item.code) ? dragX : 0
+        let offset = min(0, max(-actionWidth, base + live))
+        return ZStack(alignment: .trailing) {
+            HStack(spacing: 0) {
+                Button(action: { store.togglePin(item.code); closeSwipe() }) {
+                    Text(store.isPinned(item.code) ? "取消置顶" : "置顶")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.white)
+                        .frame(width: actionWidth / 2)
+                        .frame(maxHeight: .infinity)
+                        .background(Color(red: 0.20, green: 0.45, blue: 0.95))
+                }
+                .buttonStyle(PlainButtonStyle())
+
+                Button(action: { store.dismiss(item); closeSwipe() }) {
+                    Text("删除")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.white)
+                        .frame(width: actionWidth / 2)
+                        .frame(maxHeight: .infinity)
+                        .background(Color(red: 0.90, green: 0.22, blue: 0.25))
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+
+            cardBody(item)
+                .offset(x: offset)
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 12)
+                        .onChanged { v in
+                            // 只接管横向手势，竖向交给 ScrollView，不然首页没法上下滚
+                            guard abs(v.translation.width) > abs(v.translation.height) + 4 else { return }
+                            if dragCode != item.code { dragCode = item.code; dragX = 0 }
+                            dragX = v.translation.width
+                        }
+                        .onEnded { v in
+                            guard dragCode == item.code else { dragCode = nil; dragX = 0; return }
+                            let dx = v.translation.width
+                            if base == 0 {
+                                openCode = (dx < -actionWidth * 0.35) ? item.code : nil
+                            } else {
+                                openCode = (dx > actionWidth * 0.25) ? nil : item.code
+                            }
+                            dragCode = nil
+                            dragX = 0
+                        }
+                )
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func closeSwipe() {
+        openCode = nil
+        dragCode = nil
+        dragX = 0
+    }
+
+    private func cardBody(_ item: PickupItem) -> some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.code)
@@ -458,6 +537,11 @@ struct HomeView: View {
                         .padding(.vertical, 2)
                         .background(Color.black.opacity(0.06))
                         .clipShape(RoundedRectangle(cornerRadius: 4))
+                    if store.isPinned(item.code) {
+                        Image(systemName: "pin.fill")
+                            .font(.system(size: 9))
+                            .foregroundColor(Color(red: 0.20, green: 0.45, blue: 0.95))
+                    }
                     Text(metaText(item))
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
@@ -465,25 +549,17 @@ struct HomeView: View {
                 }
             }
             Spacer(minLength: 0)
-            if item.manual {
-                Button(action: { store.removeManual(code: item.code) }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 17))
-                        .foregroundColor(.secondary.opacity(0.55))
-                }
-                .buttonStyle(PlainButtonStyle())
-            } else {
-                Image(systemName: "doc.on.doc")
-                    .font(.system(size: 13))
-                    .foregroundColor(.secondary.opacity(0.7))
-            }
+            Image(systemName: "doc.on.doc")
+                .font(.system(size: 13))
+                .foregroundColor(.secondary.opacity(0.7))
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(UIColor.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
         .contentShape(Rectangle())
         .onTapGesture {
+            if openCode != nil { closeSwipe(); return }
             UIPasteboard.general.string = item.code
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
         }

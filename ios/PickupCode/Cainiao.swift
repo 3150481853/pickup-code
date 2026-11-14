@@ -65,36 +65,80 @@ enum Cainiao {
 
         private static func walk(_ node: Any?, _ out: inout [PickupItem],
                                  _ seen: inout Set<String>, _ depth: Int) {
-            guard depth <= 9, let node = node else { return }
+            guard depth <= 10, let node = node else { return }
 
             if let dict = node as? [String: Any] {
-                let vals: [String] = dict.values.compactMap { $0 as? String }
-                var hit: String? = nil
-                for v in vals where isCode(v) { hit = v; break }
-                if let h = hit {
-                    let code = PickupStore.normalize(h)
-                    if !seen.contains(code) {
-                        seen.insert(code)
+                if let hit = codeOf(dict) {
+                    if !seen.contains(hit) {
+                        seen.insert(hit)
+                        // 驿站名常常藏在 feature / feature2 里那层转义过的 JSON（postName / daishouName）
+                        let cand = collect(dict)
                         var station = ""
                         var bestScore = 0
                         var place = ""
-                        for v in vals {
+                        for v in cand {
                             if isCode(v) { continue }
                             let sc = stationScore(v)
                             if sc > bestScore { bestScore = sc; station = v }
                             if place.isEmpty && isPlace(v) { place = v }
                         }
-                        let rest = vals.filter { !isCode($0) && $0 != station && $0 != place }
-                        out.append(PickupItem(id: "cainiao|" + code, site: "cainiao", code: code,
+                        let rest = cand.filter { !isCode($0) && $0 != station && $0 != place }
+                        out.append(PickupItem(id: "cainiao|" + hit, site: "cainiao", code: hit,
                                               station: station, place: place,
                                               raw: String(rest.joined(separator: " / ").prefix(120)),
                                               seenAt: Date()))
                     }
                 }
-                for v in dict.values { walk(v, &out, &seen, depth + 1) }
+                for v in dict.values {
+                    if let s = v as? String { walkString(s, &out, &seen, depth + 1) }
+                    else { walk(v, &out, &seen, depth + 1) }
+                }
             } else if let arr = node as? [Any] {
                 for v in arr { walk(v, &out, &seen, depth + 1) }
             }
+        }
+
+        /// 字符串值本身可能是一层转义 JSON（feature2 就是），解开继续找
+        private static func walkString(_ s: String, _ out: inout [PickupItem],
+                                      _ seen: inout Set<String>, _ depth: Int) {
+            let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard t.count >= 2 else { return }
+            guard (t.hasPrefix("{") && t.hasSuffix("}")) || (t.hasPrefix("[") && t.hasSuffix("]")) else { return }
+            guard let data = t.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+            else { return }
+            walk(obj, &out, &seen, depth + 1)
+        }
+
+        /// 字段名带 code / pick 的先看，其次任意字符串
+        private static func codeOf(_ dict: [String: Any]) -> String? {
+            var loose: String? = nil
+            for (k, v) in dict {
+                guard let s = v as? String, isCode(s) else { continue }
+                let n = PickupStore.normalize(s)
+                let lk = k.lowercased()
+                if lk.contains("code") || lk.contains("pick") { return n }
+                if loose == nil { loose = n }
+            }
+            return loose
+        }
+
+        /// 把这一层 + 里面转义 JSON 里的字符串都收集起来，用来挑驿站名/货位
+        private static func collect(_ dict: [String: Any], _ depth: Int = 0) -> [String] {
+            guard depth <= 2 else { return [] }
+            var out: [String] = []
+            for (_, v) in dict {
+                guard let s = (v as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) else { continue }
+                if s.hasPrefix("{"), s.hasSuffix("}"),
+                   let data = s.data(using: .utf8),
+                   let inner = try? JSONSerialization.jsonObject(with: data, options: []),
+                   let d = inner as? [String: Any] {
+                    out.append(contentsOf: collect(d, depth + 1))
+                    continue
+                }
+                out.append(s)
+            }
+            return out
         }
     }
 }

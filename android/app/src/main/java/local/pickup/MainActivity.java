@@ -19,6 +19,7 @@ import android.provider.MediaStore;
 import android.text.InputType;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
@@ -199,12 +200,19 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         dlp.leftMargin = dp(6);
         head.addView(diag, dlp);
-        TextView refresh = pill("刷新全部", INK, Color.rgb(0, 0, 0));
+        TextView refresh = pill("刷新", INK, Color.rgb(0, 0, 0));
         refresh.setOnClickListener(v -> refreshAll());
         LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         rlp.leftMargin = dp(6);
         head.addView(refresh, rlp);
+
+        TextView share = pill("分享", INK, Color.rgb(0, 0, 0));
+        share.setOnClickListener(v -> sharePick());
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        slp.leftMargin = dp(6);
+        head.addView(share, slp);
 
         homeInner.addView(head);
 
@@ -265,6 +273,10 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** 当前向左划开的那一行卡片（同时只允许开一行） */
+    View openRowView;
+    static final int SWIPE_W_DP = 170;   // 划开后露出的两个按钮总宽
+
     View row(PickupItem it) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.HORIZONTAL);
@@ -274,10 +286,6 @@ public class MainActivity extends Activity {
         bg.setCornerRadius(dp(12));
         card.setBackground(bg);
         card.setPadding(dp(14), dp(12), dp(12), dp(12));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.bottomMargin = dp(8);
-        card.setLayoutParams(lp);
 
         LinearLayout left = new LinearLayout(this);
         left.setOrientation(LinearLayout.VERTICAL);
@@ -303,6 +311,22 @@ public class MainActivity extends Activity {
         tag.setBackground(tbg);
         meta.addView(tag);
 
+        if (store.isPinned(it.code)) {
+            TextView pinMark = new TextView(this);
+            pinMark.setText("置顶");
+            pinMark.setTextSize(9);
+            pinMark.setTextColor(Color.WHITE);
+            pinMark.setPadding(dp(4), dp(1), dp(4), dp(1));
+            GradientDrawable pbg = new GradientDrawable();
+            pbg.setColor(Color.rgb(51, 115, 242));
+            pbg.setCornerRadius(dp(4));
+            pinMark.setBackground(pbg);
+            LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            plp.leftMargin = dp(5);
+            meta.addView(pinMark, plp);
+        }
+
         String m = it.station;
         if (!it.place.isEmpty()) m = m.isEmpty() ? it.place : m + " · " + it.place;
         if (!m.isEmpty()) {
@@ -318,26 +342,120 @@ public class MainActivity extends Activity {
         card.addView(left, new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        TextView act = new TextView(this);
-        act.setText(it.manual ? "删除" : "复制");
-        act.setTextSize(12);
-        act.setTextColor(it.manual ? GREY : RED);
-        act.setPadding(dp(8), dp(4), dp(6), dp(4));
-        act.setOnClickListener(v -> {
-            if (it.manual) {
-                store.removeManual(it.code);
-            } else {
-                copy(it.code);
-                Toast.makeText(this, "已复制 " + it.code, Toast.LENGTH_SHORT).show();
-            }
-        });
-        card.addView(act);
+        TextView copyIcon = new TextView(this);
+        copyIcon.setText("复制");
+        copyIcon.setTextSize(12);
+        copyIcon.setTextColor(RED);
+        copyIcon.setPadding(dp(8), dp(4), dp(6), dp(4));
+        card.addView(copyIcon);
 
+        // ---- 外面套一层：右侧两个按钮垫在底下，卡片可左划 ----
+        FrameLayout frame = new FrameLayout(this);
+        GradientDrawable fbg = new GradientDrawable();
+        fbg.setColor(Color.WHITE);
+        fbg.setCornerRadius(dp(12));
+        frame.setBackground(fbg);
+        frame.setClipToOutline(true);
+        LinearLayout.LayoutParams flp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        flp.bottomMargin = dp(8);
+        frame.setLayoutParams(flp);
+
+        LinearLayout acts = new LinearLayout(this);
+        acts.setOrientation(LinearLayout.HORIZONTAL);
+        TextView pinBtn = actionButton(store.isPinned(it.code) ? "取消置顶" : "置顶",
+                Color.rgb(51, 115, 242));
+        TextView delBtn = actionButton("删除", Color.rgb(229, 56, 63));
+        acts.addView(pinBtn, new LinearLayout.LayoutParams(dp(SWIPE_W_DP / 2),
+                ViewGroup.LayoutParams.MATCH_PARENT));
+        acts.addView(delBtn, new LinearLayout.LayoutParams(dp(SWIPE_W_DP / 2),
+                ViewGroup.LayoutParams.MATCH_PARENT));
+        frame.addView(acts, new FrameLayout.LayoutParams(dp(SWIPE_W_DP),
+                ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END));
+
+        frame.addView(card, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        pinBtn.setOnClickListener(v -> {
+            store.togglePin(it.code);
+            closeOpenRow();
+            refreshHome();
+        });
+        delBtn.setOnClickListener(v -> {
+            store.dismiss(it);
+            closeOpenRow();
+            refreshHome();
+        });
+
+        attachSwipe(card, it);
+        return frame;
+    }
+
+    TextView actionButton(String label, int color) {
+        TextView tv = new TextView(this);
+        tv.setText(label);
+        tv.setTextSize(13);
+        tv.setTextColor(Color.WHITE);
+        tv.setGravity(Gravity.CENTER);
+        tv.setBackgroundColor(color);
+        return tv;
+    }
+
+    /** 左划露按钮：横向拖动时才接管手势，纵向留给 ScrollView */
+    void attachSwipe(View card, PickupItem it) {
+        final int w = dp(SWIPE_W_DP);
+        final float[] startX = {0}, startY = {0}, baseX = {0};
+        final boolean[] dragging = {false};
+        card.setOnTouchListener((v, e) -> {
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    startX[0] = e.getRawX();
+                    startY[0] = e.getRawY();
+                    baseX[0] = v.getTranslationX();
+                    dragging[0] = false;
+                    return false;
+                case MotionEvent.ACTION_MOVE: {
+                    float dx = e.getRawX() - startX[0];
+                    float dy = e.getRawY() - startY[0];
+                    if (!dragging[0] && Math.abs(dx) > dp(10) && Math.abs(dx) > Math.abs(dy)) {
+                        dragging[0] = true;
+                        if (v.getParent() != null) {
+                            v.getParent().requestDisallowInterceptTouchEvent(true);
+                        }
+                        if (openRowView != null && openRowView != v) closeOpenRow();
+                    }
+                    if (dragging[0]) {
+                        float t = baseX[0] + dx;
+                        if (t > 0) t = 0;
+                        if (t < -w) t = -w;
+                        v.setTranslationX(t);
+                    }
+                    return dragging[0];
+                }
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL: {
+                    if (!dragging[0]) return false;
+                    boolean open = v.getTranslationX() < -w * 0.4f;
+                    dragging[0] = false;
+                    v.animate().translationX(open ? -w : 0).setDuration(140).start();
+                    openRowView = open ? v : null;
+                    return true;
+                }
+            }
+            return false;
+        });
         card.setOnClickListener(v -> {
+            if (openRowView != null) { closeOpenRow(); return; }
             copy(it.code);
             Toast.makeText(this, "已复制 " + it.code, Toast.LENGTH_SHORT).show();
         });
-        return card;
+    }
+
+    void closeOpenRow() {
+        if (openRowView == null) return;
+        View v = openRowView;
+        openRowView = null;
+        v.animate().translationX(0).setDuration(140).start();
     }
 
     TextView pill(String text, int color, int bgBase) {
@@ -696,6 +814,66 @@ public class MainActivity extends Activity {
         ui.postDelayed(this::collectAll, 3000);
     }
 
+    // ---------------- 分享取件码图片 ----------------
+
+    void sharePick() {
+        if (store.items.isEmpty()) { toast("还没有取件码"); return; }
+        final List<PickupItem> all = new ArrayList<>(store.items);
+        final boolean[] sel = new boolean[all.size()];
+        final String[] labels = new String[all.size()];
+        for (int i = 0; i < all.size(); i++) {
+            sel[i] = true;   // 默认全选，用户再把不要的取消
+            PickupItem it = all.get(i);
+            StringBuilder m = new StringBuilder(store.siteLabel(it.site));
+            if (!it.station.isEmpty()) m.append(" · ").append(it.station);
+            labels[i] = it.code + "\n" + m;
+        }
+        final AlertDialog dlg = new AlertDialog.Builder(this)
+                .setTitle("选要分享的取件码")
+                .setMultiChoiceItems(labels, sel, (d, which, checked) -> sel[which] = checked)
+                .setNegativeButton("取消", null)
+                .setNeutralButton("全选/全不选", null)
+                .setPositiveButton("生成图片", null)
+                .create();
+        dlg.setOnShowListener(d -> {
+            dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                List<PickupItem> chosen = new ArrayList<>();
+                for (int i = 0; i < all.size(); i++) if (sel[i]) chosen.add(all.get(i));
+                if (chosen.isEmpty()) { toast("至少选一个"); return; }
+                dlg.dismiss();
+                shareBitmap(chosen);
+            });
+            dlg.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+                boolean anyOff = false;
+                for (boolean b : sel) if (!b) anyOff = true;
+                for (int i = 0; i < sel.length; i++) {
+                    sel[i] = anyOff;
+                    dlg.getListView().setItemChecked(i, anyOff);
+                }
+            });
+        });
+        dlg.show();
+    }
+
+    void shareBitmap(List<PickupItem> chosen) {
+        try {
+            android.graphics.Bitmap bmp = ShareCard.render(chosen, store);
+            String name = "share_" + System.currentTimeMillis() + ".png";
+            File f = new File(ShotProvider.dir(this), name);
+            java.io.FileOutputStream out = new java.io.FileOutputStream(f);
+            bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out);
+            out.close();
+            Uri uri = ShotProvider.uriFor(this, name);
+            Intent i = new Intent(Intent.ACTION_SEND);
+            i.setType("image/png");
+            i.putExtra(Intent.EXTRA_STREAM, uri);
+            i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(Intent.createChooser(i, "分享取件码图片"));
+        } catch (Exception e) {
+            toast("生成图片失败：" + e);
+        }
+    }
+
     void relogin() {
         select(1);
         ensureWeb(1);
@@ -824,13 +1002,27 @@ public class MainActivity extends Activity {
     private File pendingShot;
 
     void pickImage() {
+        // 别用 ACTION_GET_CONTENT：它会调起「文件」App，默认按文件名升序，看起来就是老照片在前。
+        // Android 13+ 用系统照片选择器（网格、最近的在前、不要存储权限）；更低版本用相册 ACTION_PICK。
         try {
-            Intent i = new Intent(Intent.ACTION_GET_CONTENT);
-            i.setType("image/*");
-            i.addCategory(Intent.CATEGORY_OPENABLE);
-            startActivityForResult(Intent.createChooser(i, "选一张取件列表截图"), REQ_PICK);
+            Intent i;
+            if (Build.VERSION.SDK_INT >= 33) {
+                i = new Intent(MediaStore.ACTION_PICK_IMAGES);
+                i.setType("image/*");
+            } else {
+                i = new Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
+                i.setType("image/*");
+            }
+            startActivityForResult(i, REQ_PICK);
         } catch (Exception e) {
-            toast("这台机没有能挑图片的应用");
+            try {
+                Intent g = new Intent(Intent.ACTION_GET_CONTENT);
+                g.setType("image/*");
+                g.addCategory(Intent.CATEGORY_OPENABLE);
+                startActivityForResult(Intent.createChooser(g, "选一张取件列表截图"), REQ_PICK);
+            } catch (Exception e2) {
+                toast("这台机没有能挑图片的应用");
+            }
         }
     }
 
@@ -996,6 +1188,10 @@ public class MainActivity extends Activity {
                     if (reply.items.isEmpty() && reply.raw != null && !reply.raw.isEmpty()) {
                         sb.append("raw：").append(reply.raw.length() > 1200
                                 ? reply.raw.substring(0, 1200) + "…" : reply.raw).append("\n");
+                    }
+                    String firstRec = Mtop.firstRecord(reply.data, 1500);
+                    if (!firstRec.isEmpty()) {
+                        sb.append(firstRec).append("\n");
                     }
                     sb.append("\n首页共 ").append(store.items.size()).append(" 条\n");
                     for (PickupItem it : store.items) {

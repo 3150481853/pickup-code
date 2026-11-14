@@ -18,10 +18,16 @@ final class PickupStore: ObservableObject {
     @Published var updatedAt: Date? = nil
     @Published var siteState: [String: String] = [:]   // "pdd" -> "未登录" / "已取 3 件"
     @Published var manualItems: [PickupItem] = []
+    /// 置顶的取件码，顺序就是置顶顺序（后置顶的排后面）
+    @Published var pinnedCodes: [String] = []
 
     private var lastPayload: [String: [PickupItem]] = [:]
+    /// 被用户划走删除的码，按站点记：源里还有它就继续藏，源里没有了就自动清掉（下次同码能重新出现）
+    private var dismissed: [String: [String]] = [:]
 
     private static let manualKey = "pickup.manual.v2"
+    private static let pinnedKey = "pickup.pinned.v1"
+    private static let dismissedKey = "pickup.dismissed.v1"
 
     // 存档用的最小结构
     private struct ManualEntry: Codable {
@@ -40,6 +46,7 @@ final class PickupStore: ObservableObject {
 
     init() {
         loadManual()
+        loadPrefs()
         republish()
     }
 
@@ -73,6 +80,7 @@ final class PickupStore: ObservableObject {
             ))
         }
         lastPayload[site] = collected
+        pruneDismissed(site)
         republish()
     }
 
@@ -80,7 +88,61 @@ final class PickupStore: ObservableObject {
     func ingestNative(site: String, items: [PickupItem], state: String? = nil) {
         if let s = state, !s.isEmpty { siteState[site] = s }
         lastPayload[site] = items
+        pruneDismissed(site)
         republish()
+    }
+
+    // MARK: - 置顶 / 划走删除
+
+    func isPinned(_ code: String) -> Bool {
+        pinnedCodes.contains(code)
+    }
+
+    /// 置顶 / 取消置顶。置顶的排在最前，按置顶先后排。
+    func togglePin(_ code: String) {
+        if let i = pinnedCodes.firstIndex(of: code) {
+            pinnedCodes.remove(at: i)
+        } else {
+            pinnedCodes.append(code)
+        }
+        savePrefs()
+        republish()
+    }
+
+    /// 左划删除：手动录入的直接删；网页抓来的记进「划走」列表（否则下次抓取又回来）
+    func dismiss(_ item: PickupItem) {
+        if item.manual {
+            removeManual(code: item.code)
+            return
+        }
+        var list = dismissed[item.site] ?? []
+        if !list.contains(item.code) { list.append(item.code) }
+        dismissed[item.site] = list
+        savePrefs()
+        republish()
+    }
+
+    /// 源里已经没这个码了，就把「划走」记录清掉，免得以后同一个码再也显示不出来
+    private func pruneDismissed(_ site: String) {
+        guard dismissed[site] != nil else { return }
+        let live = lastPayload[site]?.map { $0.code } ?? []
+        if live.isEmpty {
+            dismissed[site] = nil
+        } else {
+            let kept = (dismissed[site] ?? []).filter { live.contains($0) }
+            dismissed[site] = kept.isEmpty ? nil : kept
+        }
+        savePrefs()
+    }
+
+    private func savePrefs() {
+        UserDefaults.standard.set(pinnedCodes, forKey: PickupStore.pinnedKey)
+        UserDefaults.standard.set(dismissed, forKey: PickupStore.dismissedKey)
+    }
+
+    private func loadPrefs() {
+        pinnedCodes = (UserDefaults.standard.array(forKey: PickupStore.pinnedKey) as? [String]) ?? []
+        dismissed = (UserDefaults.standard.dictionary(forKey: PickupStore.dismissedKey) as? [String: [String]]) ?? [:]
     }
 
     // MARK: - 手动 / 识别录入
@@ -173,7 +235,16 @@ final class PickupStore: ObservableObject {
         }
 
         var merged = order.compactMap { byCode[$0] }
+        // 划走删除的藏起来（源里还在就继续藏，见 pruneDismissed）
+        merged = merged.filter { it in
+            guard let list = dismissed[it.site] else { return true }
+            return !list.contains(it.code)
+        }
+        // 置顶的最前面，按置顶先后；其余按取件码排
         merged.sort { a, b in
+            let pa = pinnedCodes.firstIndex(of: a.code) ?? Int.max
+            let pb = pinnedCodes.firstIndex(of: b.code) ?? Int.max
+            if pa != pb { return pa < pb }
             let (a1, a2) = PickupStore.splitCode(a.code)
             let (b1, b2) = PickupStore.splitCode(b.code)
             if a1 != b1 { return a1 < b1 }

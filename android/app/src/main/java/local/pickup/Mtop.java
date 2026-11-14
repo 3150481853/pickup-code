@@ -30,6 +30,7 @@ public class Mtop {
         public String api = "";
         public String ret = "";
         public String raw = "";
+        public Object data = null;
         public List<PickupItem> items = new ArrayList<>();
         public boolean ok() { return ret.startsWith("SUCCESS"); }
     }
@@ -94,6 +95,7 @@ public class Mtop {
                     r.ret = String.valueOf(retObj);
                 }
                 Object dataObj = root.opt("data");
+                r.data = dataObj;
                 if (r.ret.startsWith("SUCCESS") && dataObj != null) {
                     r.items = Parser.parse(dataObj);
                 }
@@ -141,6 +143,32 @@ public class Mtop {
         }
     }
 
+    /** 诊断用：把 data.result[0] 的字段名和整条 JSON 打出来，方便看清码倒底藏在哪个字段 */
+    public static String firstRecord(Object data, int max) {
+        try {
+            Object rec = null;
+            if (data instanceof JSONObject) {
+                Object r = ((JSONObject) data).opt("result");
+                if (r instanceof JSONArray && ((JSONArray) r).length() > 0) rec = ((JSONArray) r).opt(0);
+                else rec = data;
+            } else if (data instanceof JSONArray && ((JSONArray) data).length() > 0) {
+                rec = ((JSONArray) data).opt(0);
+            }
+            if (!(rec instanceof JSONObject)) return "";
+            JSONObject o = (JSONObject) rec;
+            StringBuilder keys = new StringBuilder();
+            for (java.util.Iterator<String> it = o.keys(); it.hasNext(); ) {
+                if (keys.length() > 0) keys.append(' ');
+                keys.append(it.next());
+            }
+            String json = o.toString();
+            if (json.length() > max) json = json.substring(0, max) + "…";
+            return "首条字段：" + keys + "\n首条 JSON：" + json;
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
     /** mtop 返回结构没有文档，只能递归扫：任何看起来像取件码的字符串都收下来。 */
     public static class Parser {
         public static List<PickupItem> parse(Object data) {
@@ -151,7 +179,7 @@ public class Mtop {
         }
 
         static void walk(Object node, List<PickupItem> out, List<String> seen, int depth) {
-            if (node == null || depth > 9) return;
+            if (node == null || depth > 10) return;
             if (node instanceof JSONArray) {
                 JSONArray arr = (JSONArray) node;
                 for (int i = 0; i < arr.length(); i++) walk(arr.opt(i), out, seen, depth + 1);
@@ -160,23 +188,63 @@ public class Mtop {
             if (!(node instanceof JSONObject)) return;
             JSONObject o = (JSONObject) node;
 
-            String code = null;
+            String code = codeOf(o);
+            if (code != null && !seen.contains(code)) {
+                seen.add(code);
+                // 驿站名常常藏在 feature / feature2 里那层转义过的 JSON（postName / daishouName）
+                List<String> cand = new ArrayList<>();
+                collect(o, cand, 0);
+                out.add(new PickupItem(code, "cainiao", stationOf(cand), placeOf(cand)));
+            }
+            for (java.util.Iterator<String> it = o.keys(); it.hasNext(); ) {
+                Object v = o.opt(it.next());
+                if (v instanceof String) walkString((String) v, out, seen, depth + 1);
+                else walk(v, out, seen, depth + 1);
+            }
+        }
+
+        /** 字符串值本身可能是一层转义 JSON，解开继续找 */
+        static void walkString(String s, List<PickupItem> out, List<String> seen, int depth) {
+            if (s == null) return;
+            String t = s.trim();
+            if (t.length() < 2) return;
+            boolean isArr = t.startsWith("[") && t.endsWith("]");
+            boolean isObj = t.startsWith("{") && t.endsWith("}");
+            if (!isArr && !isObj) return;
+            try {
+                walk(isArr ? (Object) new JSONArray(t) : new JSONObject(t), out, seen, depth + 1);
+            } catch (Exception ignored) {}
+        }
+
+        /** 字段名带 code / pick 的先看，其次任意字符串 */
+        static String codeOf(JSONObject o) {
+            String loose = null;
             for (java.util.Iterator<String> it = o.keys(); it.hasNext(); ) {
                 String k = it.next();
                 Object v = o.opt(k);
-                if (v instanceof String) {
-                    String s = Store.normalize((String) v);
-                    if (isCode(s)) { code = s; break; }
-                }
+                if (!(v instanceof String)) continue;
+                String s = Store.normalize((String) v);
+                if (!isCode(s)) continue;
+                String lk = k.toLowerCase();
+                if (lk.contains("code") || lk.contains("pick")) return s;
+                if (loose == null) loose = s;
             }
-            if (code != null && !seen.contains(code)) {
-                String station = best(o, true);
-                String place = best(o, false);
-                seen.add(code);
-                out.add(new PickupItem(code, "cainiao", station, place));
-            }
+            return loose;
+        }
+
+        /** 把这一层 + 里面转义 JSON 里的字符串都收集起来，用来挑驿站名/货位 */
+        static void collect(JSONObject o, List<String> out, int depth) {
+            if (depth > 2) return;
             for (java.util.Iterator<String> it = o.keys(); it.hasNext(); ) {
-                walk(o.opt(it.next()), out, seen, depth + 1);
+                Object v = o.opt(it.next());
+                if (v instanceof String) {
+                    String s = ((String) v).trim();
+                    if (s.length() >= 2 && s.startsWith("{") && s.endsWith("}")) {
+                        try { collect(new JSONObject(s), out, depth + 1); continue; }
+                        catch (Exception ignored) {}
+                    }
+                    out.add(s);
+                }
             }
         }
 
@@ -204,17 +272,26 @@ public class Mtop {
             return sc;
         }
 
-        static String best(JSONObject o, boolean station) {
+        /** 优先级：名字里明说是驿站的（postName/daishouName/stationName）> 打分 */
+        static String stationOf(List<String> cand) {
             String bestStr = "";
             int bestScore = 0;
-            for (java.util.Iterator<String> it = o.keys(); it.hasNext(); ) {
-                Object v = o.opt(it.next());
-                if (!(v instanceof String)) continue;
-                String s = ((String) v).trim();
-                int sc = score(s, station);
+            for (String s : cand) {
+                if (s.isEmpty()) continue;
+                int sc = score(s, true);
                 if (sc > bestScore) { bestScore = sc; bestStr = s; }
             }
             return bestScore >= 3 ? bestStr : "";
+        }
+
+        static String placeOf(List<String> cand) {
+            for (String s : cand) {
+                if (s.isEmpty() || s.length() > 24) continue;
+                for (String w : new String[]{"货架", "货位", "取件位", "架号", "柜号"}) {
+                    if (s.contains(w)) return s;
+                }
+            }
+            return "";
         }
     }
 }

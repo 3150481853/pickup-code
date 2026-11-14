@@ -31,12 +31,17 @@ public class Store {
 
     private final List<PickupItem> manual = new ArrayList<>();
     private final Map<String, List<PickupItem>> collected = new LinkedHashMap<>();
+    /** 置顶的取件码，顺序即置顶顺序 */
+    public final List<String> pinned = new ArrayList<>();
+    /** 左划删除的码，按站点记：源里还有它就继续藏，源里没了就自动清掉 */
+    private final Map<String, List<String>> dismissed = new LinkedHashMap<>();
     private final SharedPreferences sp;
     private Runnable onChange = () -> {};
 
     public Store(Context ctx) {
         sp = ctx.getSharedPreferences("pickup", Context.MODE_PRIVATE);
         loadManual();
+        loadPrefs();
         republish();
     }
 
@@ -52,6 +57,7 @@ public class Store {
     public void setCollected(String site, List<PickupItem> list, String state) {
         collected.put(site, list);
         if (state != null) siteState.put(site, state);
+        pruneDismissed(site, list);
         republish();
     }
 
@@ -59,6 +65,87 @@ public class Store {
         collected.remove(site);
         siteState.remove(site);
         republish();
+    }
+
+    // ---- 置顶 / 左划删除 ----
+
+    public boolean isPinned(String code) {
+        return pinned.contains(code);
+    }
+
+    public void togglePin(String code) {
+        if (pinned.contains(code)) pinned.remove(code);
+        else pinned.add(code);
+        savePrefs();
+        republish();
+    }
+
+    /** 左划删除：手动录入的直接删掉；网页/接口抓来的记进「划走」列表，否则下次抓取又回来 */
+    public void dismiss(PickupItem it) {
+        if ("manual".equals(it.site)) {
+            removeManual(it.code);
+            return;
+        }
+        List<String> list = dismissed.get(it.site);
+        if (list == null) { list = new ArrayList<>(); dismissed.put(it.site, list); }
+        if (!list.contains(it.code)) list.add(it.code);
+        savePrefs();
+        republish();
+    }
+
+    /** 这次抓取里已经没这个码了，就把它从「划走」里清掉，免得以后同一个码再也出不来 */
+    private void pruneDismissed(String site, List<PickupItem> list) {
+        if (!dismissed.containsKey(site)) return;
+        List<String> live = new ArrayList<>();
+        if (list != null) for (PickupItem it : list) if (it != null) live.add(it.code);
+        if (live.isEmpty()) {
+            dismissed.remove(site);
+        } else {
+            List<String> kept = new ArrayList<>();
+            for (String c : dismissed.get(site)) if (live.contains(c)) kept.add(c);
+            if (kept.isEmpty()) dismissed.remove(site);
+            else dismissed.put(site, kept);
+        }
+        savePrefs();
+    }
+
+    private void loadPrefs() {
+        try {
+            String raw = sp.getString("pinned.v1", "");
+            if (raw != null && !raw.isEmpty()) {
+                JSONArray arr = new JSONArray(raw);
+                for (int i = 0; i < arr.length(); i++) pinned.add(arr.getString(i));
+            }
+        } catch (Exception ignored) {}
+        try {
+            String raw = sp.getString("dismissed.v1", "");
+            if (raw != null && !raw.isEmpty()) {
+                JSONObject o = new JSONObject(raw);
+                java.util.Iterator<String> keys = o.keys();
+                while (keys.hasNext()) {
+                    String k = keys.next();
+                    JSONArray arr = o.optJSONArray(k);
+                    List<String> list = new ArrayList<>();
+                    if (arr != null) for (int i = 0; i < arr.length(); i++) list.add(arr.getString(i));
+                    dismissed.put(k, list);
+                }
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void savePrefs() {
+        try {
+            JSONArray arr = new JSONArray();
+            for (String c : pinned) arr.put(c);
+            JSONObject o = new JSONObject();
+            for (Map.Entry<String, List<String>> e : dismissed.entrySet()) {
+                JSONArray a = new JSONArray();
+                for (String c : e.getValue()) a.put(c);
+                o.put(e.getKey(), a);
+            }
+            sp.edit().putString("pinned.v1", arr.toString())
+                     .putString("dismissed.v1", o.toString()).apply();
+        } catch (Exception ignored) {}
     }
 
     // ---- 手动录入 ----
@@ -99,10 +186,27 @@ public class Store {
                 out.add(it);
             }
         }
-        Collections.sort(out, (a, b) -> codeCompare(a.code, b.code));
+        // 划走删除的藏起来
+        List<PickupItem> kept = new ArrayList<>();
+        for (PickupItem it : out) if (!isDismissed(it)) kept.add(it);
+        out = kept;
+        // 置顶的最前面（按置顶先后），其余按取件码排
+        Collections.sort(out, (a, b) -> {
+            int pa = pinned.indexOf(a.code);
+            int pb = pinned.indexOf(b.code);
+            if (pa < 0) pa = Integer.MAX_VALUE;
+            if (pb < 0) pb = Integer.MAX_VALUE;
+            if (pa != pb) return pa < pb ? -1 : 1;
+            return codeCompare(a.code, b.code);
+        });
         items.clear();
         items.addAll(out);
         onChange.run();
+    }
+
+    private boolean isDismissed(PickupItem it) {
+        List<String> list = dismissed.get(it.site);
+        return list != null && list.contains(it.code);
     }
 
     public static int codeCompare(String a, String b) {

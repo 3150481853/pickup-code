@@ -129,9 +129,33 @@
     }
 
     // ---- 拼多多：官方结构 ----
+    // 坑：驿站名常常只渲染在列表头一处（`station-name`），下面每张卡片里没有，
+    // 于是 7 件里只有第一件带驿站名；`package-tags` 里混着「支持退换货」「导航」
+    // 「电话」「照片」这类按钮文案，当成货位就变成 place:"支持退换货"。
+    function listStationName() {
+        var el = document.querySelector('[class*="station-name"]');
+        var s = el ? norm(el.textContent) : '';
+        if (s) { return s; }
+        var body = norm(document.body ? document.body.textContent : '');
+        var m = body.match(/[\u4e00-\u9fa5A-Za-z0-9]{2,16}驿站/);
+        return m ? m[0] : '';
+    }
+
+    function cleanPlace(s) {
+        s = norm(s).slice(0, 24);
+        if (!s) { return ''; }
+        if (/支持|退换|导航|电话|照片|复制|提醒|入站|天|小时|查看/.test(s)) {
+            var m = s.match(PLACE);
+            return m ? norm(m[1]) : '';
+        }
+        var p = s.match(PLACE);
+        return p ? norm(p[1]) : s;
+    }
+
     function collectPdd() {
         var out = [];
         var seen = Object.create(null);
+        var listStation = listStationName();
         var nodes = document.querySelectorAll('[class*="package-list-picking"]');
         for (var i = 0; i < nodes.length; i++) {
             var n = nodes[i];
@@ -144,9 +168,15 @@
             var tags = n.querySelector('[class*="package-tags"]');
             var raw = norm(n.textContent);
             pushUnique(out, seen, m[0],
-                st ? norm(st.textContent) : '',
-                tags ? norm(tags.textContent).slice(0, 20) : '',
+                st ? norm(st.textContent) : listStation,
+                tags ? cleanPlace(tags.textContent) : '',
                 raw.length > 90 ? raw.slice(0, 90) : raw);
+        }
+        // 兜底：还是没驿站名的，统一补上列表头那个
+        if (listStation) {
+            for (var k = 0; k < out.length; k++) {
+                if (!out[k].station) { out[k].station = listStation; }
+            }
         }
         return out;
     }
