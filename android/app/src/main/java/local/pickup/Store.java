@@ -396,6 +396,15 @@ public class Store {
         List<PickupItem> kept = new ArrayList<>();
         for (PickupItem it : out) if (!isDismissed(it)) kept.add(it);
         out = kept;
+        // 已取/已出库的也藏起来：菜鸟接口按近 30 天返回，取走的件会一遍遍落回来，
+        // 只从 collected 里摘掉不够（下一轮轮询又灌回来，「明明都出了还在列表里」就是这么来的）
+        if (!archived.isEmpty()) {
+            List<String> gone = new ArrayList<>();
+            for (PickupItem a : archived) if (a.code != null) gone.add(a.code);
+            List<PickupItem> kept2 = new ArrayList<>();
+            for (PickupItem it : out) if (!gone.contains(it.code)) kept2.add(it);
+            out = kept2;
+        }
         // 置顶的最前面（按置顶先后），其余按取件码排
         Collections.sort(out, (a, b) -> {
             int pa = pinned.indexOf(a.code);

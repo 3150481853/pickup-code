@@ -66,9 +66,22 @@ enum Cainiao {
 
         static func isStation(_ s: String) -> Bool { stationScore(s) > 0 }
 
+        /// JSON 里的噪声：布尔、小数（经纬度）、长数字 ID、空串 —— 这些绝不能当货位/驿站/单号
+        static func isJunk(_ s: String) -> Bool {
+            let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            if t.isEmpty || t.count > 60 { return true }
+            let low = t.lowercased()
+            if low == "true" || low == "false" || low == "null" || low == "none" { return true }
+            if t.contains(".") { return true }                       // 23.451012 这种
+            if t.count >= 6 && t.allSatisfy({ $0.isNumber }) { return true }   // 440184 / 4401841…
+            if t.range(of: "0{5,}", options: .regularExpression) != nil { return true }  // 50000000000049
+            return false
+        }
+
         static func isPlace(_ s: String) -> Bool {
-            guard !s.isEmpty, s.count <= 24 else { return false }
+            guard !s.isEmpty, s.count <= 12, !isJunk(s) else { return false }
             for k in ["货架", "货位", "取件位", "架号", "柜号"] where s.contains(k) { return true }
+            // 4-11 / A2-3 这种货位号；不能是取件码本身（三段）
             return s.range(of: "^[A-Za-z]?[0-9]{1,3}-[0-9]{1,3}$", options: .regularExpression) != nil
         }
 
@@ -79,12 +92,15 @@ enum Cainiao {
             var loose = ""
             for s in cand {
                 let t = s.uppercased()
+                if isJunk(t) { continue }
                 let ns = t as NSString
                 guard let re = try? NSRegularExpression(pattern: mailPattern) else { return loose }
                 for m in re.matches(in: t, options: [], range: NSRange(location: 0, length: ns.length)) {
                     let no = ns.substring(with: m.range)
                     // 11 位纯数字基本都是手机号，跳过
                     if no.count == 11 && no.allSatisfy({ $0.isNumber }) { continue }
+                    // 长串 0 的伪 ID（50000000000049）跳过
+                    if no.range(of: "0{5,}", options: .regularExpression) != nil { continue }
                     if no.range(of: "^[A-Z]{2,3}[0-9]+$", options: .regularExpression) != nil { return no }
                     if loose.isEmpty { loose = no }
                 }
@@ -199,7 +215,8 @@ enum Cainiao {
             if let dict = node as? [String: Any] {
                 if let hit = codeOf(dict) {
                     let ps = pairs(dict)
-                    let cand = ps.map { $0.1 }
+                    // 噪声（true/false、经纬度、长 ID）先剔掉，否则驿站/货位/单号都会挑到垃圾值
+                    let cand = ps.map { $0.1 }.filter { !isJunk($0) }
                     // 已经取走/签收的也会被这个接口按「近 30 天」返回，这里筛掉
                     if !seen.contains(hit) && !isDone(cand) {
                         seen.insert(hit)
@@ -212,7 +229,7 @@ enum Cainiao {
                             if sc > bestScore { bestScore = sc; station = v }
                             if place.isEmpty && isPlace(v) { place = v }
                         }
-                        let rest = cand.filter { !isCode($0) && $0 != station && $0 != place }
+                        let rest = cand.filter { !isCode($0) && !isJunk($0) && $0 != station && $0 != place }
                         out.append(PickupItem(id: "cainiao|" + hit, site: "cainiao", code: hit,
                                               station: station, place: place,
                                               raw: String(rest.joined(separator: " / ").prefix(120)),

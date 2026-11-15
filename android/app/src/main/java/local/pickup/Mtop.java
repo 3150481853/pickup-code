@@ -394,19 +394,33 @@ public class Mtop {
             String bestStr = "";
             int bestScore = 0;
             for (String s : cand) {
-                if (s.isEmpty()) continue;
+                if (s.isEmpty() || isJunk(s)) continue;
                 int sc = score(s, true);
                 if (sc > bestScore) { bestScore = sc; bestStr = s; }
             }
             return bestScore >= 3 ? bestStr : "";
         }
 
+        /** JSON 里的噪声：布尔、小数（经纬度）、长数字 ID —— 绝不能当货位/驿站/单号 */
+        static boolean isJunk(String s) {
+            if (s == null) return true;
+            String t = s.trim();
+            if (t.isEmpty() || t.length() > 60) return true;
+            String low = t.toLowerCase();
+            if (low.equals("true") || low.equals("false") || low.equals("null") || low.equals("none")) return true;
+            if (t.contains(".")) return true;
+            if (t.length() >= 6 && t.matches("[0-9]+")) return true;
+            if (t.matches(".*0{5,}.*")) return true;    // 50000000000049 这种伪 ID
+            return false;
+        }
+
         static String placeOf(List<String> cand) {
             for (String s : cand) {
-                if (s.isEmpty() || s.length() > 24) continue;
+                if (s.isEmpty() || s.length() > 12 || isJunk(s)) continue;
                 for (String w : new String[]{"货架", "货位", "取件位", "架号", "柜号"}) {
                     if (s.contains(w)) return s;
                 }
+                if (s.matches("^[A-Za-z]?[0-9]{1,3}-[0-9]{1,3}$")) return s;
             }
             return "";
         }
@@ -418,11 +432,12 @@ public class Mtop {
         static String mailNoOf(List<String> cand) {
             String loose = "";
             for (String s : cand) {
-                if (s == null || s.isEmpty()) continue;
+                if (s == null || s.isEmpty() || isJunk(s)) continue;
                 java.util.regex.Matcher m = MAIL.matcher(s.toUpperCase());
                 while (m.find()) {
                     String no = m.group();
                     if (no.length() == 11) continue;   // 手机号
+                    if (no.matches(".*0{5,}.*")) continue;   // 伪 ID
                     if (no.matches("[A-Z]{2,3}[0-9]+")) return no;   // 带前缀的更可信
                     if (loose.isEmpty()) loose = no;
                 }

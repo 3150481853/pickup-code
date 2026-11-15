@@ -426,6 +426,12 @@ final class PickupStore: ObservableObject {
             guard let list = dismissed[it.site] else { return true }
             return !list.contains(it.code)
         }
+        // 已取/已出库的也藏起来。菜鸟接口按近 30 天返回，取走的件还会一遍遍回来，
+        // 光从 lastPayload 摘掉不够 —— 下一次轮询就又灌回来了（用户看到「明明都出了还在列表里」）。
+        if !archived.isEmpty {
+            let gone = Set(archived.map { $0.code })
+            merged = merged.filter { !gone.contains($0.code) }
+        }
         // 置顶的最前面，按置顶先后；其余按取件码排
         merged.sort { a, b in
             let pa = pinnedCodes.firstIndex(of: a.code) ?? Int.max
