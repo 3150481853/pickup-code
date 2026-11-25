@@ -40,7 +40,7 @@ final class AppModel: ObservableObject {
     func queryCainiao() {
         Cainiao.query { [weak self] reply, items in
             guard let self = self else { return }
-            var note = "菜鸟接口：" + reply.ret
+            var note: String = "菜鸟接口：" + reply.ret
             if reply.ok {
                 note += " · " + String(items.count) + " 件"
                 self.needsLogin = false
@@ -93,23 +93,39 @@ final class AppModel: ObservableObject {
         // 真正能判断「登录态到底有没有效」的是这一条。
         Cainiao.query { [weak self] reply, items in
             guard let self = self else { return }
-            var t = "ret: " + reply.ret + "\n原生抓到 " + String(items.count) + " 件"
-            if !items.isEmpty {
-                let withImg = items.filter { !$0.img.isEmpty }.count
-                t += "（有主图 " + String(withImg) + " 件）"
-                t += "\n" + items.prefix(12).map {
-                    $0.code + " ｜ " + $0.station + " ｜ " + $0.place
-                        + " ｜ img=" + ($0.img.isEmpty ? "-" : String($0.img.prefix(60)))
-                }.joined(separator: "\n")
-            }
-            // 成功也带上 raw 样本：返回结构没有文档，只能靠真数据对齐字段名
-            // （0.9.0 就是因为没看过 raw，把「校园快递服务中心」当成驿站名了）。
-            if !reply.raw.isEmpty { t += "\nraw: " + String(reply.raw.prefix(2000)) }
-            // 主图取不到时，得知道返回里到底有没有图片地址：把所有 http 串挑几条出来
-            let urls = Cainiao.Parser.imageCandidates(reply.raw, limit: 6)
-            if !urls.isEmpty { t += "\n图片候选: " + urls.joined(separator: "  ,  ") }
-            self.diag.append(("菜鸟接口", t))
+            let note: String = AppModel.cainiaoNote(reply: reply, items: items)
+            self.diag.append(("菜鸟接口", note))
         }
+    }
+
+    /// 单独拆成一个函数：这么大一段字符串拼接塞在闭包里，Xcode 16.4 的类型检查器
+    /// 会报 "the compiler is unable to type-check this expression in reasonable time"
+    /// （macos-15 runner 上必挂，macos-latest 上又不挂，很容易被 continue-on-error 掩盖）。
+    static func cainiaoNote(reply: MtopReply, items: [PickupItem]) -> String {
+        var parts: [String] = []
+        parts.append("ret: " + reply.ret)
+        parts.append("原生抓到 " + String(items.count) + " 件")
+        if !items.isEmpty {
+            let withImg: Int = items.filter { !$0.img.isEmpty }.count
+            parts.append("（有主图 " + String(withImg) + " 件）")
+            var rows: [String] = []
+            for it in items.prefix(12) {
+                let pic: String = it.img.isEmpty ? "-" : String(it.img.prefix(60))
+                rows.append(it.code + " ｜ " + it.station + " ｜ " + it.place + " ｜ img=" + pic)
+            }
+            parts.append(rows.joined(separator: "\n"))
+        }
+        // 成功也带上 raw 样本：返回结构没有文档，只能靠真数据对齐字段名
+        // （0.9.0 就是因为没看过 raw，把「校园快递服务中心」当成驿站名了）。
+        if !reply.raw.isEmpty {
+            parts.append("raw: " + String(reply.raw.prefix(2000)))
+        }
+        // 主图取不到时，得知道返回里到底有没有图片地址
+        let urls: [String] = Cainiao.Parser.imageCandidates(reply.raw, limit: 6)
+        if !urls.isEmpty {
+            parts.append("图片候选: " + urls.joined(separator: "  ,  "))
+        }
+        return parts.joined(separator: "\n")
     }
 }
 

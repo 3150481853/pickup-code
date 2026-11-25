@@ -13,9 +13,12 @@ jobs:
   build:
     name: build (${{ matrix.os }})
     # macos-14 在这个账号上会被解析成 macos-14-arm64-us-default（不支持），
-    # 所以一轮里同时试几个镜像：哪个能起跑哪个就出 ipa，失败的不影响其它。
+    # 所以一轮里同时试两个镜像；哪个能起跑就用哪个的产物。
+    #
+    # 以前这里挂了 continue-on-error: true，结果 macos-15 那条腿因为
+    # Xcode 16.4 的类型检查超时一直 failure，整轮却显示绿色 —— 等于把真错误藏起来了。
+    # 现在不再吞失败：哪条腿红就去看哪条腿。
     runs-on: ${{ matrix.os }}
-    continue-on-error: true
     timeout-minutes: 30
     strategy:
       fail-fast: false
