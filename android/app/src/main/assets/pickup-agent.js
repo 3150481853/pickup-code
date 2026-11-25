@@ -23,6 +23,11 @@
     var PLACE = /((?:货架|货位|取件位|位置|柜机|柜号|货架号)[:：]?\s*[A-Za-z0-9\-]{1,10}|[A-Z]?\d{1,2}\s*号?\s*(?:架|柜|排|层))/;
     var LOGIN_HINT = /(您需要登录才能继续访问|请登录|手机登录|扫码登录|验证码)/;
 
+    // 「字母-数字」这种形态（顺丰的 B-13016）和商品型号（卡夫特 K-5211 导热硅脂）
+    // 长得一模一样。所以这类码必须过语境关：附近得有取件字样，且不能是商品标题。
+    var PRODUCT = /(已售|人付款|包邮|旗舰|官方|券|折扣|优惠|促销|库存|规格|颜色|尺码|型号|导热|适配|适用|正品|现货|销量|评价|品牌|新品|￥|¥|加入购物车|立即购买|客服|发货|保修|材质|件装|套装|二合一|旗舰店|领券|到手价)/;
+    var PICKCTX = /(取件码|取件|提货|驿站|自提|代收|货架|货位|入站|待取|柜机|取货)/;
+
     // 页面自己的 console.error 也存一份，诊断页能直接看到「为什么挂了」
     var CONSOLE = [];
     try {
@@ -207,6 +212,18 @@
         return p ? norm(p[1]) : s;
     }
 
+    // 字母开头的短码必须过语境关：既是「取件」场景、又不是商品标题，才当取件码。
+    // 三段数字码（122-3-12020）很独特，只在明显是商品/价格上下文时排掉。
+    function codeOk(code, ctx) {
+        var c = String(code || '');
+        var s = String(ctx || '');
+        if (/^[A-Za-z]{1,3}\s*[-－—–−]/.test(c)) {
+            if (PRODUCT.test(s)) { return false; }
+            return PICKCTX.test(s);
+        }
+        return !/(已售|人付款|加入购物车|领券|到手价|￥\s*\d|¥\s*\d)/.test(s);
+    }
+
     function collectPdd() {
         var out = [];
         var seen = Object.create(null);
@@ -222,6 +239,7 @@
             var st = n.querySelector('[class*="station-name"]');
             var tags = n.querySelector('[class*="package-tags"]');
             var raw = norm(n.textContent);
+            if (!codeOk(m[0], raw)) { continue; }
             pushUnique(out, seen, m[0],
                 st ? norm(st.textContent) : listStation,
                 tags ? cleanPlace(tags.textContent) : '',
@@ -267,6 +285,7 @@
                 ctx = at;
                 card = a;
             }
+            if (!codeOk(code, ctx + ' ' + t)) { return; }
             var sm = ctx.match(STATION);
             var pm = ctx.match(PLACE);
             pushUnique(out, seen, code, sm ? sm[1] : '', pm ? norm(pm[1]) : '',

@@ -1254,7 +1254,9 @@ public class MainActivity extends Activity {
             boolean ok = store.addManual(code.getText().toString(),
                     station.getText().toString().trim(), "",
                     mail.getText().toString().trim());
-            Toast.makeText(this, ok ? "已添加" : "格式不对或重复了", Toast.LENGTH_SHORT).show();
+            // 手动录入要宽松：纯数字 4~9 位（驿站直接报一串数字）也算，别把用户挡回去
+            Toast.makeText(this, ok ? "已添加" : "不像取件码：122-3-12020 / B-13016 / B13016 / 72365 都行",
+                    Toast.LENGTH_LONG).show();
             if (ok) dlg.dismiss();
         });
         dlg.show();

@@ -460,9 +460,13 @@ public class Store {
 
     public static boolean looksLikeCode(String code) {
         if (code == null || code.isEmpty()) return false;
-        // 122-3-12020 / 54-4-13021 / B-13016 / 12-3456
+        // 122-3-12020 / 54-4-13021 / B-13016 / B13016 / 12-3456
+        // 再加「纯数字 4~9 位」：有的驿站就报一串数字（72365 / 2024061），
+        // 手动录入是用户自己确认过的，不该拦。
         return code.matches("^[A-Z]{1,3}-[0-9]{1,7}$")
-            || code.matches("^[0-9]{1,4}-[0-9]{1,7}(-[0-9]{1,7})?$");
+            || code.matches("^[0-9]{1,4}-[0-9]{1,7}(-[0-9]{1,7})?$")
+            || code.matches("^[A-Z]{1,3}[0-9]{3,7}$")
+            || code.matches("^[0-9]{4,9}$");
     }
 
     private void loadManual() {

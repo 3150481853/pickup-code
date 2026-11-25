@@ -333,15 +333,20 @@ final class PickupStore: ObservableObject {
         return t.uppercased()
     }
 
-    /// 是否像取件码。两种常见形态：
-    /// - 驿站/菜鸟：`122-3-12020`（数字-数字-数字[，也可能只有两段]）
-    /// - 顺丰：`B-13016`（1~3 个字母 + 破折号 + 数字）
+    /// 是否像取件码。手动录入要放宽，别把用户自己知道的码挡在门外：
+    /// - 驿站/菜鸟：`122-3-12020`（数字-数字[-数字]，也允许只有两段）
+    /// - 顺丰：`B-13016`（1~3 个字母 + 破折号 + 数字），也允许 `B13016` 连写
+    /// - 有的驿站直接给一串数字：`72365` / `2024061`（4~9 位纯数字）
     static func looksLikeCode(_ s: String) -> Bool {
         let t = normalize(s)
         let two = "^[A-Z]{1,3}-[0-9]{1,7}$"
         let three = "^[0-9]{1,4}-[0-9]{1,7}(-[0-9]{1,7})?$"
+        let glued = "^[A-Z]{1,3}[0-9]{3,7}$"
+        let plain = "^[0-9]{4,9}$"
         return t.range(of: two, options: .regularExpression) != nil
             || t.range(of: three, options: .regularExpression) != nil
+            || t.range(of: glued, options: .regularExpression) != nil
+            || t.range(of: plain, options: .regularExpression) != nil
     }
 
     @discardableResult

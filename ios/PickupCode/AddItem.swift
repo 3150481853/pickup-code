@@ -250,16 +250,23 @@ struct AddItemView: View {
         if store.addManual(code: code, station: station, place: place, mailNo: mailNo) {
             presentationMode.wrappedValue.dismiss()
         } else {
-            hint = "这个不像取件码。驿站一般是「数字-数字-数字」（122-3-12020），顺丰是「字母-数字」（B-13016）"
+            hint = "这个不像取件码。常见形态：「122-3-12020」「B-13016」「B13016」，或者驿站直接给的一串数字（4~9 位，如 72365）"
         }
     }
 
     private func saveFound() {
+        var ok = 0
         for c in found {
-            store.addManual(code: c, station: foundStation, place: "",
-                            mailNo: found.count == 1 ? mailNo : "")
+            if store.addManual(code: c, station: foundStation, place: "",
+                               mailNo: found.count == 1 ? mailNo : "") {
+                ok += 1
+            }
         }
-        presentationMode.wrappedValue.dismiss()
+        if ok == 0 {
+            hint = "识别出来的都不像取件码，可以手动改一下再用"
+        } else {
+            presentationMode.wrappedValue.dismiss()
+        }
     }
 
     private func runOCR(_ image: UIImage) {

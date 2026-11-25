@@ -10,8 +10,8 @@ android {
         applicationId "local.pickup.android"
         minSdk 24
         targetSdk 34
-        versionCode 25
-        versionName "0.15.1"
+        versionCode 26
+        versionName "0.15.2"
     }
 
     signingConfigs {
